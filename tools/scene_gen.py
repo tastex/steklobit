@@ -272,10 +272,15 @@ def dragon():
     for sh in data["polys"]:
         groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
-    # the head looks right, turns through a squashed profile and looks left, then back
-    turn = poses(lambda u: (lerp(1, 0.45, u * 2) if u < 0.5 else lerp(-0.45, -1, u * 2 - 1), 1))
-    head_g = about(anim_scale(turn), HEAD_CX, 150, g["head"])
-    wing_g = rot_group(g["wing"], 10, -14, 352, 292)
+    # as in the video: the head looks up-left for frames 0-7 and 15-17, then snaps round to the right
+    # for frames 8-14 while the wing lifts (the traced photo is the right-looking pose)
+    look_left = [i < 8 or i > 14 for i in range(len(SEQ))]
+    flip = [(-1, 1) if l else (1, 1) for l in look_left]
+    lift = [(-14, -10) if l else (0, 0) for l in look_left]
+    tilt = [8 if l else 0 for l in look_left]
+    head_g = (f'<g>{anim_translate(lift)}<g>{anim_rotate(tilt, HEAD_CX, 150)}'
+              f'{about(anim_scale(flip), HEAD_CX, 150, g["head"])}</g></g>')
+    wing_g = f'<g>{anim_rotate([16 if l else 0 for l in look_left], 352, 292)}{g["wing"]}</g>'
     tail_g = rot_group(g["tail"], -7, 9, 300, 360)
     legs_g = rot_group(g["legs"], -5, 5, 220, 400)
     figure = rot_group(tail_g + legs_g + g["body"] + wing_g + head_g, -3, 3, 240, 450)
