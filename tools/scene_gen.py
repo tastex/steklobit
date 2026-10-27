@@ -261,7 +261,7 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
-NECK, NECK_X = (85, 88), 215   # indices in dragon_shards.json; mirror line for the left-looking pose
+NECK = (85, 88)   # neck pieces in dragon_shards.json that only belong to the right-looking pose (photo 2 has none there)
 
 
 def dragon():
@@ -275,24 +275,25 @@ def dragon():
     groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
     neck = ""
     for i, sh in enumerate(data["polys"]):
-        if i in NECK:   # two neck pieces on the left: they swap sides together with the head
+        if i in NECK:
             neck += f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
             continue
         groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
     filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["filler"])
     head2 = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["head"])
-    # as in the video the head is re-laid in one go: looking left for frames 0-5 and 13-17, right for 6-12
-    left = [i < 6 or i > 12 for i in range(len(SEQ))]
+    # as in the video: looking left for frames 0-7 and 15-17, right for 8-14; the head is re-laid in one go
+    left = [i < 8 or i > 14 for i in range(len(SEQ))]
+    # small tilt every frame, and a nod (beak dropping) just before each turn; minus lowers a left-looking beak
+    nod = [0, -3, -8, -4, 0, -3, -10, -14, 7, 4, 0, 2, 0, 4, 8, -6, -2, 0]
 
     def shown(on):
         keys = [0] + [i for i in range(1, len(on)) if on[i] != on[i - 1]]
         vals = ";".join("visible" if on[k] else "hidden" for k in keys)
         times = ";".join(f"{k / len(on):.4f}" for k in keys)
         return f'<animate attributeName="visibility" values="{vals}" keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/>'
-    neck2 = f'<g transform="translate({2 * NECK_X} 0) scale(-1 1)">{neck}</g>'
-    head_g = (f'<g>{shown([not l for l in left])}{g["head"]}{neck}</g>'
-              f'<g>{shown(left)}{neck2}{head2}</g>')
+    head_g = (f'<g>{shown([not l for l in left])}<g>{anim_rotate(nod, 250, 190)}{g["head"]}</g>{neck}</g>'
+              f'<g>{shown(left)}<g>{anim_rotate(nod, 150, 165)}{head2}</g></g>')
     # the rest stays the glass of the first photo, nudged a little every frame
     wing_g = rot_group(g["wing"], 12, -16, 352, 292)
     tail_g = rot_group(g["tail"], -7, 9, 300, 360)
