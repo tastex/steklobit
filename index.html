@@ -132,6 +132,17 @@ input[type=range]{width:100%;accent-color:var(--g-amber);margin:0}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .chip{border:0;background:rgba(255,255,255,.07);padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;clip-path:var(--shard)}
 .chip:hover{background:rgba(255,255,255,.16)}
+.chip:disabled{opacity:.5;cursor:progress}
+.chip.main{background:color-mix(in srgb,var(--g-amber) 32%,transparent)}
+.chip.main:hover{background:color-mix(in srgb,var(--g-amber) 50%,transparent)}
+.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.actions label{font-size:12.5px;color:var(--ink-dim);display:flex;align-items:center;gap:6px}
+.actions select{font:inherit;font-size:13px;color:var(--ink);background:rgba(255,255,255,.07);border:1px solid var(--edge);border-radius:4px;padding:4px 6px}
+.actions select option{background:#2a1d14}
+.act-note{font-size:12.5px;color:var(--ink-dim)}
+.share-box{display:flex;gap:6px;align-items:center}
+.share-box[hidden]{display:none}
+.share-box input{flex:1;min-width:0;font:inherit;font-size:12.5px;color:var(--ink);background:rgba(0,0,0,.25);border:1px solid var(--edge);border-radius:4px;padding:6px 8px}
 
 /* clean mode: only the animation */
 body.clean .pane,body.clean .tools .hide-in-clean{display:none}
@@ -194,6 +205,15 @@ body.clean .shade{opacity:0}
       <div class="knob"><label for="seqVol">Громкость <output id="seqVolOut">0%</output></label><input id="seqVol" type="range" min="0" max="1" step="0.01"></div>
     </div>
     <div class="grid-wrap"><div class="grid" id="grid"></div></div>
+    <div class="actions">
+      <label for="loops">Длина</label><select id="loops">
+        <option value="4">4 такта</option><option value="8" selected>8 тактов</option><option value="16">16 тактов</option><option value="32">32 такта</option>
+      </select>
+      <button class="chip main" id="export" type="button">Скачать бит</button>
+      <button class="chip main" id="share" type="button">Поделиться ссылкой</button>
+      <span class="act-note" id="actNote" role="status"></span>
+    </div>
+    <div class="share-box" id="shareBox" hidden><input id="shareUrl" readonly aria-label="Ссылка на бит"><button class="chip" id="copy" type="button">Копировать</button></div>
     <p class="hint">Клетка: нажатие — громкий удар, второе — тихий, третье — убрать. Нажмите на название звука, чтобы заглушить строку.</p>
   </div></section>
 </main>
@@ -285,6 +305,12 @@ function makeNoise(){
 function initAudio(){
   if (ctx) { if (ctx.state==='suspended') ctx.resume(); return; }
   ctx = new AC();
+  buildGraph(0);
+  loadSamples();
+  CHANNELS.forEach(c=>applyChannel(c.id));
+}
+/* the whole chain on the current ctx; dur>0 means an offline render of that many seconds */
+function buildGraph(dur){
   master = ctx.createGain(); master.gain.value = .9;
   const comp = ctx.createDynamicsCompressor(); comp.threshold.value=-14; comp.ratio.value=4;
   master.connect(comp); comp.connect(ctx.destination);
@@ -295,9 +321,7 @@ function initAudio(){
   seqBus.connect(master); seqBus.connect(verbSend);
   noiseBuf = makeNoise();
   rowGain = ROWS.map((r,i)=>{const g=ctx.createGain(); g.gain.value = state.mute[i]?0:1; g.connect(seqBus); return g;});
-  setupAmbient();
-  loadSamples();
-  CHANNELS.forEach(c=>applyChannel(c.id));
+  setupAmbient(dur);
 }
 
 /* small building blocks */
@@ -316,13 +340,13 @@ const rnd = (a,b)=>a+Math.random()*(b-a);
 /* glass instruments: (time, velocity, output) */
 /* one-shots cut from the animation's soundtrack */
 const SMP = {};
-function loadSamples(){
+function loadSamples(c=ctx){
   let data = {}; try { data = JSON.parse(document.getElementById('samples').textContent); } catch(e){}
-  Object.entries(data).forEach(([k,b64])=>{
+  return Promise.all(Object.entries(data).filter(([k])=>!SMP[k]).map(([k,b64])=>new Promise(done=>{
     const bin = atob(b64), buf = new Uint8Array(bin.length);
     for (let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
-    try { ctx.decodeAudioData(buf.buffer, b=>{ SMP[k]=b; }, ()=>{}); } catch(e){}
-  });
+    try { c.decodeAudioData(buf.buffer, b=>{ SMP[k]=b; done(); }, done); } catch(e){ done(); }
+  })));
 }
 function sample(k,t,v,out,fallback){
   if (!SMP[k]) return fallback(t,v,out);
@@ -368,7 +392,7 @@ const INST = {
 
 /* ambient layers */
 function loopNoise(){const s=ctx.createBufferSource(); s.buffer=noiseBuf; s.loop=true; s.start(); return s;}
-function setupAmbient(){
+function setupAmbient(dur){
   CHANNELS.forEach(c=>{const g=ctx.createGain(); g.gain.value=0; g.connect(master); chGain[c.id]=g;});
   chGain.rain.connect(verbSend);
 
@@ -376,8 +400,9 @@ function setupAmbient(){
   { const n=loopNoise(), bp=ctx.createBiquadFilter(), lp=ctx.createBiquadFilter(), g=ctx.createGain();
     bp.type='bandpass'; bp.frequency.value=1500; bp.Q.value=.5; lp.type='lowpass'; lp.frequency.value=6000; g.gain.value=.35;
     n.connect(bp); bp.connect(lp); lp.connect(g); g.connect(chGain.rain);
-    setInterval(()=>{ if(!state.ch.rain.on || ctx.state!=='running') return;
-      if (Math.random()<.45) partial(rnd(2000,5000),ctx.currentTime+rnd(.01,.08),rnd(.02,.07),.03,chGain.rain); },70);
+    const drop = t=>{ if (Math.random()<.45) partial(rnd(2000,5000),t+rnd(.01,.08),rnd(.02,.07),.03,chGain.rain); };
+    if (dur) { if (state.ch.rain.on) for (let t=0;t<dur;t+=.07) drop(t); }
+    else setInterval(()=>{ if(state.ch.rain.on && ctx.state==='running') drop(ctx.currentTime); },70);
   }
   // wind: low noise with slowly moving filter
   { const n=loopNoise(), lp=ctx.createBiquadFilter(), lfo=ctx.createOscillator(), depth=ctx.createGain(), g=ctx.createGain();
@@ -398,7 +423,7 @@ function setupAmbient(){
     [[784,1],[786.5,.8],[1568,.25]].forEach(([f,a])=>{const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;g.gain.value=a;o.connect(g);g.connect(trem);o.start();});
     trem.connect(lp); lp.connect(chGain.sing); chGain.sing.connect(verbSend);
   }
-  connectVideo();
+  if (!dur) connectVideo();
 }
 function connectVideo(){
   if (videoSrc || !ctx || !hasVideo) return;
@@ -548,8 +573,8 @@ function knob(id, key, fmt, apply){
 const pct = v=>Math.round(v*100)+'%';
 const setBpm = knob('bpm','bpm',v=>v);
 const setSwing = knob('swing','swing',v=>Math.round(v*200)+'%');
-knob('verb','reverb',pct,()=>ctx&&verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05));
-knob('seqVol','seqVol',pct,()=>ctx&&seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05));
+const setVerb = knob('verb','reverb',pct,()=>ctx&&verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05));
+const setVol = knob('seqVol','seqVol',pct,()=>ctx&&seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05));
 
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{
   const p=PRESETS[b.dataset.preset]; state.grid=p.rows.map(parse); state.bpm=p.bpm; state.swing=p.swing;
@@ -600,6 +625,128 @@ playBtn.addEventListener('click',()=>{
   else { clearInterval(timer); showStep(-1); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) try { vec.unpauseAnimations(); } catch(e){} icon.innerHTML='<path d="M5 3l12 7-12 7z"/>'; playBtn.setAttribute('aria-label','Играть'); }
 });
 document.addEventListener('keydown',e=>{ if(e.code==='Space' && e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON'){ e.preventDefault(); playBtn.click(); } });
+
+/* ---------- export: the same graph rendered offline, saved as WAV ---------- */
+const actNote=document.getElementById('actNote');
+const note=t=>{ actNote.textContent=t; };
+async function renderBeat(loops){
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const sr = 44100, loopDur = STEPS*stepDur(), tail = 3.5, dur = loops*loopDur + tail;
+  const off = new OAC(2, Math.ceil(dur*sr), sr);
+  await loadSamples(off);
+  // swap the engine onto the offline context; everything below runs synchronously, so live timers never see it
+  const live = {ctx, master, verbSend, seqBus, noiseBuf, rowGain, chGain};
+  try {
+    ctx = off; chGain = {}; buildGraph(dur);
+    CHANNELS.forEach(c=>{ const on = c.id!=='video' && state.ch[c.id].on, g = chGain[c.id].gain;
+      if (!on) return;
+      g.setValueAtTime(0,0); g.linearRampToValueAtTime(state.ch[c.id].vol,.4);
+      g.setValueAtTime(state.ch[c.id].vol,dur-tail); g.linearRampToValueAtTime(0,dur-.2); });
+    for (let n=0, t0=.02; n<loops*STEPS; n++, t0+=stepDur()){
+      const s=n%STEPS, t=t0+(s%2 ? stepDur()*state.swing : 0);
+      ROWS.forEach((r,ri)=>{ const v=state.grid[ri][s]; if (v) INST[r.id](t, v===1?1:.45, rowGain[ri]); });
+    }
+  } finally { ({ctx, master, verbSend, seqBus, noiseBuf, rowGain, chGain} = live); }
+  return off.startRendering ? await new Promise((ok,fail)=>{ off.oncomplete=e=>ok(e.renderedBuffer); const p=off.startRendering(); if (p && p.catch) p.catch(fail); }) : null;
+}
+function wav(buf){
+  const ch = buf.numberOfChannels, len = buf.length, data = new DataView(new ArrayBuffer(44 + len*ch*2));
+  const str = (o,t)=>{ for (let i=0;i<t.length;i++) data.setUint8(o+i,t.charCodeAt(i)); };
+  str(0,'RIFF'); data.setUint32(4,36+len*ch*2,true); str(8,'WAVEfmt '); data.setUint32(16,16,true);
+  data.setUint16(20,1,true); data.setUint16(22,ch,true); data.setUint32(24,buf.sampleRate,true);
+  data.setUint32(28,buf.sampleRate*ch*2,true); data.setUint16(32,ch*2,true); data.setUint16(34,16,true);
+  str(36,'data'); data.setUint32(40,len*ch*2,true);
+  const chans = [...Array(ch)].map((_,c)=>buf.getChannelData(c));
+  let peak = 0; chans.forEach(d=>{ for (let i=0;i<len;i++) peak=Math.max(peak,Math.abs(d[i])); });
+  const k = peak>.98 ? .98/peak : 1;
+  for (let i=0,o=44;i<len;i++) for (let c=0;c<ch;c++,o+=2){ const v=Math.max(-1,Math.min(1,chans[c][i]*k)); data.setInt16(o, v<0?v*0x8000:v*0x7fff, true); }
+  return new Uint8Array(data.buffer);
+}
+/* a zip with one stored file: the claude.ai viewer saves zip but not wav */
+function zip1(name, bytes){
+  const crcT = [...Array(256)].map((_,n)=>{ for (let k=0;k<8;k++) n = n&1 ? 0xEDB88320^(n>>>1) : n>>>1; return n>>>0; });
+  let crc = -1; for (let i=0;i<bytes.length;i++) crc = crcT[(crc^bytes[i])&255]^(crc>>>8); crc = (crc^-1)>>>0;
+  const fn = new TextEncoder().encode(name), lh = new DataView(new ArrayBuffer(30)), cd = new DataView(new ArrayBuffer(46)), end = new DataView(new ArrayBuffer(22));
+  lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint32(14,crc,true); lh.setUint32(18,bytes.length,true); lh.setUint32(22,bytes.length,true); lh.setUint16(26,fn.length,true);
+  cd.setUint32(0,0x02014b50,true); cd.setUint16(4,20,true); cd.setUint16(6,20,true); cd.setUint32(16,crc,true); cd.setUint32(20,bytes.length,true); cd.setUint32(24,bytes.length,true); cd.setUint16(28,fn.length,true);
+  end.setUint32(0,0x06054b50,true); end.setUint16(8,1,true); end.setUint16(10,1,true); end.setUint32(12,46+fn.length,true); end.setUint32(16,30+fn.length+bytes.length,true);
+  return new Blob([lh,fn,bytes,cd,fn,end],{type:'application/zip'});
+}
+const exportBtn=document.getElementById('export');
+exportBtn.addEventListener('click', async ()=>{
+  const loops = +document.getElementById('loops').value;
+  exportBtn.disabled = true; note('Свожу бит…');
+  try {
+    const buf = await renderBeat(loops), bytes = wav(buf);
+    const name = `steklobit-${state.bpm}bpm.wav`, secs = Math.round(buf.duration);
+    const dl = window.claude && window.claude.use ? await window.claude.use('downloads').catch(()=>null) : null;
+    if (dl) {
+      try { await dl.save({filename: name.replace('.wav','.zip'), data: zip1(name, bytes)}); note(`Готово: ${secs} с, WAV в архиве`); }
+      catch(e){ note(e && e.code==='declined' ? '' : 'Не получилось сохранить файл'); }
+    } else {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes],{type:'audio/wav'})); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 60000);
+      note(`Готово: ${secs} с, WAV`);
+    }
+  } catch(e){ note('Не получилось свести бит'); console.error(e); }
+  exportBtn.disabled = false;
+});
+
+/* ---------- share: the beat lives in the link's #hash ---------- */
+const PAGE_URL = 'https://tastex.github.io/steklobit/';
+const CODE = '.xo';
+function encodeBeat(){
+  const q = new URLSearchParams();
+  q.set('t', state.bpm); q.set('sw', Math.round(state.swing*100)); q.set('e', Math.round(state.reverb*100)); q.set('v', Math.round(state.seqVol*100));
+  q.set('g', state.grid.map(r=>r.map(v=>CODE[v]).join('')).join('-'));
+  if (state.mute.some(Boolean)) q.set('m', state.mute.map(m=>m?1:0).join(''));
+  const amb = CHANNELS.filter(c=>c.id!=='video' && state.ch[c.id].on).map(c=>c.id+'.'+Math.round(state.ch[c.id].vol*100));
+  if (amb.length) q.set('a', amb.join('-'));
+  return q.toString();
+}
+let pendingAmb = [];
+function decodeBeat(hash){
+  const q = new URLSearchParams(hash.replace(/^#/,'')), g = (q.get('g')||'').split('-');
+  if (g.length!==ROWS.length || g.some(r=>!new RegExp(`^[.xo]{${STEPS}}$`).test(r))) return false;
+  const num = (k,lo,hi,def)=>{ const v=parseFloat(q.get(k)); return isFinite(v) ? Math.min(hi,Math.max(lo,v)) : def; };
+  state.grid = g.map(r=>[...r].map(c=>CODE.indexOf(c)));
+  state.bpm = Math.round(num('t',56,160,state.bpm)); state.swing = num('sw',0,50,state.swing*100)/100;
+  state.reverb = num('e',0,100,state.reverb*100)/100; state.seqVol = num('v',0,100,state.seqVol*100)/100;
+  const m = q.get('m')||''; state.mute = ROWS.map((_,i)=>m[i]==='1');
+  pendingAmb = [];
+  (q.get('a')||'').split('-').forEach(x=>{ const [id,v]=x.split('.'); if (state.ch[id] && id!=='video'){ state.ch[id].vol=Math.min(1,Math.max(0,(+v||50)/100)); pendingAmb.push(id); } });
+  return true;
+}
+function applyLink(){
+  if (!decodeBeat(location.hash)) return;
+  setBpm(state.bpm); setSwing(state.swing); setVerb(state.reverb); setVol(state.seqVol);
+  ROWS.forEach((_,r)=>{ paintRow(r); if (ctx) rowGain[r].gain.setTargetAtTime(state.mute[r]?0:1,ctx.currentTime,.02); });
+  if (ctx){ verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05); seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05); }
+  CHANNELS.forEach(c=>{ document.getElementById('vol-'+c.id).value = state.ch[c.id].vol; if (state.ch[c.id].on && !pendingAmb.includes(c.id)){ state.ch[c.id].on=false; paintChannel(c.id); applyChannel(c.id); } });
+  save();
+  note('Бит из ссылки загружен. Нажмите ▶, чтобы послушать');
+  try { history.replaceState(null,'',location.pathname+location.search); } catch(e){}   // later edits are not overwritten on reload
+}
+/* sounds from the link switch on with the first play: browsers do not allow sound before a tap */
+playBtn.addEventListener('click',()=>{ pendingAmb.forEach(id=>{ if (!state.ch[id].on){ state.ch[id].on=true; paintChannel(id); applyChannel(id); } }); pendingAmb=[]; });
+applyLink();
+addEventListener('hashchange', applyLink);
+
+const shareBox=document.getElementById('shareBox'), shareUrl=document.getElementById('shareUrl');
+const ownUrl = /^https?:$/.test(location.protocol) && /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
+document.getElementById('share').addEventListener('click', async ()=>{
+  const url = (ownUrl ? location.origin+location.pathname : PAGE_URL) + '#' + encodeBeat();
+  shareUrl.value = url; shareBox.hidden = false; shareUrl.focus(); shareUrl.select();
+  if (navigator.share && matchMedia('(pointer: coarse)').matches){
+    try { await navigator.share({title:'Стеклобит', text:'Послушай мой бит из стекла', url}); note(''); return; } catch(e){ if (e && e.name==='AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); note('Ссылка скопирована'); } catch(e){ note('Скопируйте ссылку из поля ниже'); }
+});
+document.getElementById('copy').addEventListener('click', async ()=>{
+  shareUrl.select();
+  try { await navigator.clipboard.writeText(shareUrl.value); note('Ссылка скопирована'); }
+  catch(e){ try { document.execCommand('copy'); note('Ссылка скопирована'); } catch(_){ note('Выделите ссылку и скопируйте'); } }
+});
 
 /* clean mode */
 const cleanBtn=document.getElementById('clean');
