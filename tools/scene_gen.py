@@ -261,6 +261,9 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
+NECK, NECK_X = (85, 88), 215   # indices in dragon_shards.json; mirror line for the left-looking pose
+
+
 def dragon():
     """traced from Vladimir's photos of the dragon mosaic: dragon_shards.json is every piece of the first photo
     (looking right), dragon_pose2.json the head from the second photo (looking left) plus light filler glass
@@ -270,7 +273,11 @@ def dragon():
     data = json.load(open(os.path.join(here, "dragon_shards.json")))
     pose2 = json.load(open(os.path.join(here, "dragon_pose2.json")))
     groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
-    for sh in data["polys"]:
+    neck = ""
+    for i, sh in enumerate(data["polys"]):
+        if i in NECK:   # two neck pieces on the left: they swap sides together with the head
+            neck += f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
+            continue
         groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
     filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["filler"])
@@ -283,7 +290,9 @@ def dragon():
         vals = ";".join("visible" if on[k] else "hidden" for k in keys)
         times = ";".join(f"{k / len(on):.4f}" for k in keys)
         return f'<animate attributeName="visibility" values="{vals}" keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/>'
-    head_g = f'<g>{shown([not l for l in left])}{g["head"]}</g><g>{shown(left)}{head2}</g>'
+    neck2 = f'<g transform="translate({2 * NECK_X} 0) scale(-1 1)">{neck}</g>'
+    head_g = (f'<g>{shown([not l for l in left])}{g["head"]}{neck}</g>'
+              f'<g>{shown(left)}{neck2}{head2}</g>')
     # the rest stays the glass of the first photo, nudged a little every frame
     wing_g = rot_group(g["wing"], 12, -16, 352, 292)
     tail_g = rot_group(g["tail"], -7, 9, 300, 360)
