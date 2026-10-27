@@ -1,5 +1,5 @@
 """Matches the glass pieces of the two dragon photos (dragon_shards.json: looking right, figB.json from segB2.py: looking left)
-and writes dragon_morph.json for scene_gen.py. Run next to those files."""
+and writes dragon_pose2.json (the left-looking head, plus light filler glass behind the figure) for scene_gen.py. Run next to those files."""
 import json, numpy as np, cv2, colorsys
 A=json.load(open('dragon_shards.json'))
 B=json.load(open('figB.json'))
@@ -100,7 +100,6 @@ for k in range(len(keep)):
         if cv2.contourArea(c)<60: continue
         ap=cv2.approxPolyDP(c,3,True).reshape(-1,2)/S
         if len(ap)>=3: fill.append({'p':ap.round(1).tolist(),'c':light[rng.integers(len(light))]})
-print('shards',len(shards),'filler',len(fill))
-out={'grout':A['grout'],'bg':[{'p':p['p'],'c':p['c']} for p in bgA]+fill,
-     'shards':[{'part':s['part'],'c':s['c'],'a':np.round(s['a'],1).tolist(),'b':np.round(s['b'],1).tolist()} for s in shards]}
-json.dump(out,open('dragon_morph.json','w'),separators=(',',':'))
+head2=[{'p':p['p'],'c':fixc(p['c'])} for p in Bf if p['part']=='head']
+print('head2',len(head2),'filler',len(fill))
+json.dump({'head':head2,'filler':fill},open('dragon_pose2.json','w'),separators=(',',':'))

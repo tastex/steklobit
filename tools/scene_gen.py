@@ -262,28 +262,34 @@ D_GROUT = "#e4e9f1"
 
 
 def dragon():
-    """traced from Vladimir's two photos of the dragon mosaic: dragon_morph.json holds every glass piece
-    in both poses (a: looking right, b: looking left, same piece order); frame by frame each piece
-    slides from one place to the other, like moving the glass by hand for stop-motion"""
+    """traced from Vladimir's photos of the dragon mosaic: dragon_shards.json is every piece of the first photo
+    (looking right), dragon_pose2.json the head from the second photo (looking left) plus light filler glass
+    for the spot the right-looking head leaves bare"""
     import json, os
-    data = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dragon_morph.json")))
-    # pose blend per video frame: 0 = looking right (photo 1), 1 = looking left (photo 2)
-    U = [1, 1, 1, 1, .75, .5, .25, 0, 0, 0, 0, 0, .25, .5, .75, 1, 1, 1]
-    # the head does not slide through the middle: it is re-laid in one go halfway through, as in the video
-    U_HEAD = [1 if u >= .5 else 0 for u in U]
-    out = [f'<rect width="500" height="500" fill="{data["grout"]}"/>']
-    out += [f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in data["bg"]]
-    for sh in data["shards"]:
-        us = U_HEAD if sh["part"] == "head" else U
-        keys = [0] + [i for i in range(1, len(us)) if us[i] != us[i - 1]]
-        times = ";".join(f"{k / len(us):.4f}" for k in keys)
+    here = os.path.dirname(os.path.abspath(__file__))
+    data = json.load(open(os.path.join(here, "dragon_shards.json")))
+    pose2 = json.load(open(os.path.join(here, "dragon_pose2.json")))
+    groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
+    for sh in data["polys"]:
+        groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
+    g = {k: "".join(v) for k, v in groups.items()}
+    filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["filler"])
+    head2 = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["head"])
+    # as in the video the head is re-laid in one go: looking left for frames 0-5 and 13-17, right for 6-12
+    left = [i < 6 or i > 12 for i in range(len(SEQ))]
 
-        def at(u):
-            return pts([(lerp(x0, x1, u), lerp(y0, y1, u)) for (x0, y0), (x1, y1) in zip(sh["a"], sh["b"])])
-        vals = ";".join(at(us[k]) for k in keys)
-        out.append(f'<polygon points="{at(us[0])}" fill="{sh["c"]}"><animate attributeName="points" values="{vals}" '
-                   f'keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/></polygon>')
-    return "".join(out)
+    def shown(on):
+        keys = [0] + [i for i in range(1, len(on)) if on[i] != on[i - 1]]
+        vals = ";".join("visible" if on[k] else "hidden" for k in keys)
+        times = ";".join(f"{k / len(on):.4f}" for k in keys)
+        return f'<animate attributeName="visibility" values="{vals}" keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/>'
+    head_g = f'<g>{shown([not l for l in left])}{g["head"]}</g><g>{shown(left)}{head2}</g>'
+    # the rest stays the glass of the first photo, nudged a little every frame
+    wing_g = rot_group(g["wing"], 12, -16, 352, 292)
+    tail_g = rot_group(g["tail"], -7, 9, 300, 360)
+    legs_g = rot_group(g["legs"], -5, 5, 220, 400)
+    figure = rot_group(tail_g + legs_g + g["body"] + wing_g, -2, 2, 240, 450)
+    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{filler}{figure}{head_g}'
 
 
 # ---------- tiger (local 520x520 window) ----------
