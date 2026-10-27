@@ -464,12 +464,11 @@ function loadVideo(){
     videoUrl = URL.createObjectURL(new Blob(chunks, {type:'video/mp4'}));
     video.src = videoUrl; blur.src = videoUrl;
   })().then(()=>{ videoLoading = null; applyBg(); startVideo(); },
-            ()=>{ videoLoading = null; noVideo(); });
+            e=>{ videoLoading = null; noVideo(String(e && e.message || e).slice(0, 40)); });
   return videoLoading;
 }
 document.getElementById('bgMode').addEventListener('click', ()=>{
-  // calling play() inside the tap lets Safari start the element later, once the file has arrived
-  video.play().catch(()=>{}); blur.play().catch(()=>{});
+  if (videoLoading) return;            // a second tap while the file is arriving must not switch back
   if (!drawn && videoUrl && video.paused) { startVideo(); applyBg(); return; }
   drawn = !drawn; try { localStorage.setItem('steklobit:bg2', drawn ? 'vec' : 'video'); } catch(e){}
   if (!drawn) loadVideo();
@@ -485,8 +484,12 @@ function layoutVideo(){
 addEventListener('resize', layoutVideo);
 video.addEventListener('loadedmetadata', layoutVideo);
 applyBg();
-function noVideo(){ hasVideo=false; video.hidden=true; blur.hidden=true; markVideoChannel(); applyBg(); }
-video.addEventListener('error', noVideo);
+function noVideo(why){
+  hasVideo=false; video.hidden=true; blur.hidden=true; markVideoChannel(); applyBg();
+  const btn=document.getElementById('bgMode'); btn.hidden=false; btn.disabled=true;
+  btn.textContent='Видео не открылось' + (why ? ` (${why})` : '');
+}
+video.addEventListener('error', ()=>{ if (video.getAttribute('src')) noVideo('код ' + (video.error ? video.error.code : '?')); });
 video.addEventListener('loadeddata', ()=>{ hasVideo=true; video.hidden=false; markVideoChannel(); applyBg(); });
 
 /* ---------- mixer UI ---------- */
