@@ -263,6 +263,8 @@ D_GROUT = "#e4e9f1"
 
 NECK = (85, 88)   # the two left neck pieces in dragon_shards.json
 TURN_X, TURN_DX, TURN_DY = 215, 0, -8   # mirror line of the head, and its shift when it looks left
+UPPER_SHIFT = (-8, -6)
+UPPER = (90, 92, 93, 94, 95)   # top of the body under the head: re-laid toward the neck when the head turns left
 
 
 def dragon():
@@ -274,9 +276,9 @@ def dragon():
     data = json.load(open(os.path.join(here, "dragon_shards.json")))
     filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
                      for sh in json.load(open(os.path.join(here, "dragon_pose2.json")))["filler"])
-    groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
+    groups = {"bg": [], "head": [], "upper": [], "body": [], "wing": [], "tail": [], "legs": []}
     for i, sh in enumerate(data["polys"]):
-        part = "head" if i in NECK else sh["part"]   # the curl of the neck turns with the head
+        part = "head" if i in NECK else "upper" if i in UPPER else sh["part"]   # the curl of the neck turns with the head
         groups[part].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
     # as in the video the beak points left for frames 0-7 and 15-17 and right for 8-14 (the photo looks right)
@@ -289,7 +291,8 @@ def dragon():
     wing_g = rot_group(g["wing"], 12, -22, 352, 292)
     tail_g = rot_group(g["tail"], -10, 12, 300, 360)
     legs_g = rot_group(g["legs"], -6, 6, 220, 400)
-    figure = rot_group(tail_g + legs_g + g["body"] + wing_g + head_g, -5, 5, 240, 450)
+    upper_g = f'<g>{anim_translate([UPPER_SHIFT if l else (0, 0) for l in left])}{g["upper"]}</g>'
+    figure = rot_group(tail_g + legs_g + g["body"] + upper_g + wing_g + head_g, -5, 5, 240, 450)
     return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{filler}{figure}'
 
 
