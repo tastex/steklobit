@@ -142,8 +142,8 @@ body.clean .shade{opacity:0}
 </style>
 </head>
 <body>
-<video id="bgBlur" src="animation.mp4" muted loop playsinline preload="none" aria-hidden="true" hidden></video>
-<video id="bg" src="animation.mp4" muted loop playsinline preload="none"></video>
+<video id="bgBlur" muted loop playsinline preload="none" aria-hidden="true" hidden></video>
+<video id="bg" muted loop playsinline preload="none"></video>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 1080" id="vec" hidden role="img" aria-label="Стена с мозаиками: дракон и тигр в деревянных рамках">
 <defs>
 <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8e5df"/><stop offset="1" stop-color="#dcd6cc"/></linearGradient>
@@ -407,7 +407,7 @@ function connectVideo(){
 }
 function applyChannel(id){
   const c = state.ch[id]; if (!ctx || !chGain[id]) return;
-  if (id==='video'){ if (c.on) connectVideo(); if (video.paused && hasVideo) video.play().catch(()=>{}); }
+  if (id==='video' && c.on){ connectVideo(); loadVideo(); }
   chGain[id].gain.setTargetAtTime(c.on ? c.vol : 0, ctx.currentTime, .25);
 }
 
@@ -435,15 +435,47 @@ function applyBg(){
   vec.hidden = !useVec;
   video.style.opacity = useVec ? '0' : '';
   document.getElementById('fallback').hidden = true;
-  document.getElementById('bgMode').textContent = drawn ? 'Показать видео' : 'Показать рисунок';
+  if (!videoLoading) document.getElementById('bgMode').textContent = drawn ? 'Показать видео' : 'Показать рисунок';
   document.getElementById('bgMode').hidden = !hasVideo;
   layoutVideo();
 }
+/* The video is fetched whole and played from memory: it starts only on demand, shows progress,
+   and plays even where the host does not serve byte ranges (iPhone Safari needs them for a plain src). */
+let videoUrl = null, videoLoading = null;
+function startVideo(){
+  video.play().catch(()=>{ if (!drawn) document.getElementById('bgMode').textContent = 'Запустить видео'; });
+  blur.play().catch(()=>{});
+}
+function loadVideo(){
+  if (videoUrl) { startVideo(); return Promise.resolve(); }
+  if (videoLoading) return videoLoading;
+  const btn = document.getElementById('bgMode');
+  videoLoading = (async ()=>{
+    btn.textContent = 'Загружаю видео…';
+    const res = await fetch('animation.mp4');
+    if (!res.ok) throw new Error(res.status);
+    const total = +res.headers.get('content-length') || 0, chunks = [];
+    let got = 0;
+    if (res.body && res.body.getReader){
+      const reader = res.body.getReader();
+      for (;;){ const {done, value} = await reader.read(); if (done) break;
+        chunks.push(value); got += value.length; if (total) btn.textContent = `Загружаю видео… ${Math.round(got/total*100)}%`; }
+    } else chunks.push(new Uint8Array(await res.arrayBuffer()));
+    videoUrl = URL.createObjectURL(new Blob(chunks, {type:'video/mp4'}));
+    video.src = videoUrl; blur.src = videoUrl;
+  })().then(()=>{ videoLoading = null; applyBg(); startVideo(); },
+            ()=>{ videoLoading = null; noVideo(); });
+  return videoLoading;
+}
 document.getElementById('bgMode').addEventListener('click', ()=>{
+  // calling play() inside the tap lets Safari start the element later, once the file has arrived
+  video.play().catch(()=>{}); blur.play().catch(()=>{});
+  if (!drawn && videoUrl && video.paused) { startVideo(); applyBg(); return; }
   drawn = !drawn; try { localStorage.setItem('steklobit:bg2', drawn ? 'vec' : 'video'); } catch(e){}
-  if (!drawn) { video.play().catch(()=>{}); blur.play().catch(()=>{}); }
+  if (!drawn) loadVideo();
   applyBg();
 });
+if (!drawn) loadVideo();
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) { try { vec.pauseAnimations(); } catch(e){} }
 function layoutVideo(){
   fitBox(vec, 1620, 1080, false);
@@ -542,7 +574,11 @@ function draw(){
   while (queue.length && queue[0].t <= ctx.currentTime){ const {s}=queue.shift(); showStep(s); }
   requestAnimationFrame(draw);
 }
+/* while the beat plays, the mosaic poses step with the sequencer instead of their own clock */
+const POSE = 2.4/18; let pose = 0;
+function stepPose(){ try { pose = (pose+1)%18; vec.setCurrentTime(pose*POSE + POSE/2); } catch(e){} }
 function showStep(s){
+  if (s>=0) stepPose();
   if (shown>=0) cells.forEach(row=>row[shown].classList.remove('now'));
   shown=s; if (s>=0) cells.forEach(row=>row[s].classList.add('now'));
 }
@@ -550,9 +586,9 @@ const playBtn=document.getElementById('play'), icon=document.getElementById('pla
 playBtn.addEventListener('click',()=>{
   initAudio();
   playing=!playing;
-  if (playing){ cur=0; nextT=ctx.currentTime+.06; queue.length=0; schedule(); timer=setInterval(schedule,25); requestAnimationFrame(draw);
+  if (playing){ try { vec.pauseAnimations(); } catch(e){} cur=0; nextT=ctx.currentTime+.06; queue.length=0; schedule(); timer=setInterval(schedule,25); requestAnimationFrame(draw);
     icon.innerHTML='<path d="M5 3h4v14H5zM11 3h4v14h-4z"/>'; playBtn.setAttribute('aria-label','Пауза'); }
-  else { clearInterval(timer); showStep(-1); icon.innerHTML='<path d="M5 3l12 7-12 7z"/>'; playBtn.setAttribute('aria-label','Играть'); }
+  else { clearInterval(timer); showStep(-1); if (!matchMedia('(prefers-reduced-motion: reduce)').matches) try { vec.unpauseAnimations(); } catch(e){} icon.innerHTML='<path d="M5 3l12 7-12 7z"/>'; playBtn.setAttribute('aria-label','Играть'); }
 });
 document.addEventListener('keydown',e=>{ if(e.code==='Space' && e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON'){ e.preventDefault(); playBtn.click(); } });
 
