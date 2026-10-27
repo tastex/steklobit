@@ -261,42 +261,32 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
-NECK = (85, 88)   # the two left neck pieces in dragon_shards.json
-TURN_X, TURN_DX, TURN_DY = 215, 0, -8   # mirror line of the head, and its shift when it looks left
-UPPER_SHIFT = (-8, -6)
-UPPER = (90, 92, 93, 94, 95)   # top of the body under the head: re-laid toward the neck when the head turns left
-
-
 def dragon():
-    """traced from Vladimir's photo of the dragon mosaic (dragon_shards.json), moved like the first drawn dragon:
-    the whole head sways and turns its beak from one side to the other, the wing flaps, tail and legs swing.
-    dragon_pose2.json adds light filler glass for the spots the turning head leaves bare."""
-    import json, os
-    here = os.path.dirname(os.path.abspath(__file__))
-    data = json.load(open(os.path.join(here, "dragon_shards.json")))
-    filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
-                     for sh in json.load(open(os.path.join(here, "dragon_pose2.json")))["filler"])
-    groups = {"bg": [], "head": [], "upper": [], "body": [], "wing": [], "tail": [], "legs": []}
-    for i, sh in enumerate(data["polys"]):
-        part = "head" if i in NECK else "upper" if i in UPPER else sh["part"]   # the curl of the neck turns with the head
-        groups[part].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
-    g = {k: "".join(v) for k, v in groups.items()}
-    # as in the video the beak points left for frames 0-7 and 15-17 and right for 8-14 (the photo looks right)
-    left = [i < 8 or i > 14 for i in range(len(SEQ))]
-    # turned left, the head is mirrored about its neck line and lifted, so the neck still lands on the body
-    head_turn = (f'<g>{anim_translate([(TURN_X + TURN_DX, 140 + TURN_DY) if l else (TURN_X, 140) for l in left])}'
-                 f'<g>{anim_scale([(-1, 1) if l else (1, 1) for l in left])}'
-                 f'<g transform="translate({-TURN_X} -140)">{g["head"]}</g></g></g>')
-    # tilt per frame: the beak stays raised as on the photos, dipping only a little just before each turn
-    # (plus lifts a left-pointing beak, minus a right-pointing one)
-    tilt = [14, 16, 18, 16, 14, 12, 8, 6, -12, -10, -8, -10, -12, -8, -4, 10, 12, 14]
-    head_g = f'<g>{anim_rotate(tilt, 215, 200)}{head_turn}</g>'
-    wing_g = rot_group(g["wing"], 12, -22, 352, 292)
-    tail_g = rot_group(g["tail"], -10, 12, 300, 360)
-    legs_g = rot_group(g["legs"], -6, 6, 220, 400)
-    upper_g = f'<g>{anim_translate([UPPER_SHIFT if l else (0, 0) for l in left])}{g["upper"]}</g>'
-    figure = rot_group(tail_g + legs_g + g["body"] + upper_g + wing_g + head_g, -5, 5, 240, 450)
-    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{filler}{figure}'
+    bg = shards([(0, 0), (500, 0), (500, 500), (0, 500)],
+                ["#e9eef6", "#dfe4f0", "#f4f6fa", "#d6dcec", "#ccd3e6", "#eef0f7"], 70, 3, "#c9cfde")
+    tail = shards([(196, 340), (262, 346), (324, 376), (384, 408), (402, 432), (382, 458), (316, 452), (254, 432), (198, 404)], GREEN, 34, 2.4, D_GROUT) \
+        + shards([(368, 414), (410, 402), (428, 430), (406, 462), (370, 455)], RED, 26, 2.2, D_GROUT)
+    leg1 = shards([(165, 378), (202, 384), (196, 440), (176, 452), (148, 446), (166, 420)], GREEN, 28, 2.2, D_GROUT)
+    leg2 = shards([(238, 392), (276, 388), (292, 446), (266, 462), (244, 456)], GREEN, 28, 2.2, D_GROUT)
+    body = shards([(105, 188), (180, 212), (240, 238), (282, 300), (272, 360), (222, 392), (160, 386), (110, 352), (74, 300), (68, 248)], GREEN, 36, 2.4, D_GROUT)
+    for spike in ([(76, 232), (50, 248), (82, 256)], [(70, 270), (44, 286), (76, 294)], [(72, 306), (48, 324), (82, 328)]):
+        body += shards(spike, GREEN, 22, 2, D_GROUT)
+    wing = shards([(226, 236), (300, 232), (372, 250), (436, 266), (470, 286), (432, 310), (362, 334), (290, 346), (244, 318)], GREEN, 34, 2.4, D_GROUT)
+    head = shards([(95, 110), (130, 84), (176, 74), (216, 94), (232, 140), (216, 190), (180, 216), (140, 206), (104, 176), (88, 140)], GREEN, 34, 2.4, D_GROUT)
+    head += shards([(38, 94), (100, 104), (102, 142)], RED, 24, 2, D_GROUT)
+    for crest in ([(148, 82), (158, 42), (178, 84)], [(178, 82), (194, 58), (204, 94)], [(202, 94), (226, 80), (214, 114)]):
+        head += shards(crest, RED, 22, 2, D_GROUT)
+    head += shards(ngon(138, 128, 11, 9, 7), ["#f7f9fc", "#e9eef6"], 40, 3, D_GROUT)
+
+    # head: sways and turns its beak from left to right half-way through the move
+    head_turn = f'<g>{anim_translate([(160, 140)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1 if u < 0.5 else -1, 1)))}<g transform="translate(-160 -140)">{head}</g></g></g>'
+    head_g = rot_group(head_turn, -14, 12, 172, 205)
+    wing_g = rot_group(wing, 12, -22, 246, 282)
+    tail_g = rot_group(tail, -10, 12, 212, 372)
+    leg1_g = rot_group(leg1, -8, 6, 182, 384)
+    leg2_g = rot_group(leg2, 6, -8, 256, 392)
+    figure = rot_group(tail_g + leg1_g + leg2_g + body + wing_g + head_g, -5, 5, 200, 440)
+    return bg + figure
 
 
 # ---------- tiger (local 520x520 window) ----------
