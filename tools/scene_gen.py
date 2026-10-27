@@ -261,6 +261,10 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
+NECK = (85, 88)   # the two left neck pieces in dragon_shards.json
+TURN_X, TURN_DX, TURN_DY = 215, 0, -8   # mirror line of the head, and its shift when it looks left
+
+
 def dragon():
     """traced from Vladimir's photo of the dragon mosaic (dragon_shards.json), moved like the first drawn dragon:
     the whole head sways and turns its beak from one side to the other, the wing flaps, tail and legs swing.
@@ -271,13 +275,16 @@ def dragon():
     filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
                      for sh in json.load(open(os.path.join(here, "dragon_pose2.json")))["filler"])
     groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
-    for sh in data["polys"]:
-        groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
+    for i, sh in enumerate(data["polys"]):
+        part = "head" if i in NECK else sh["part"]   # the curl of the neck turns with the head
+        groups[part].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
     # as in the video the beak points left for frames 0-7 and 15-17 and right for 8-14 (the photo looks right)
     left = [i < 8 or i > 14 for i in range(len(SEQ))]
-    head_turn = (f'<g>{anim_translate([(250, 140)] * len(SEQ))}<g>{anim_scale([(-1, 1) if l else (1, 1) for l in left])}'
-                 f'<g transform="translate(-250 -140)">{g["head"]}</g></g></g>')
+    # turned left, the head is mirrored about its neck line and lifted, so the neck still lands on the body
+    head_turn = (f'<g>{anim_translate([(TURN_X + TURN_DX, 140 + TURN_DY) if l else (TURN_X, 140) for l in left])}'
+                 f'<g>{anim_scale([(-1, 1) if l else (1, 1) for l in left])}'
+                 f'<g transform="translate({-TURN_X} -140)">{g["head"]}</g></g></g>')
     head_g = rot_group(head_turn, -12, 12, 225, 200)
     wing_g = rot_group(g["wing"], 12, -22, 352, 292)
     tail_g = rot_group(g["tail"], -10, 12, 300, 360)
