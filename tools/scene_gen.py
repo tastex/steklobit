@@ -289,26 +289,18 @@ T_GROUT = "#1a1410"
 
 
 def tiger():
-    bg = shards([(0, 0), (520, 0), (520, 520), (0, 520)], TURQ, 80, 3.5, "#0f2f3a") \
-        + shards([(0, 0), (520, 0), (520, 60), (300, 90), (0, 70)], LAV, 60, 3, "#2a2a40")
-    body = shards([(250, 110), (340, 94), (430, 110), (490, 170), (496, 262), (470, 340), (420, 382), (340, 382), (298, 330), (296, 200)], CAMO, 40, 3, T_GROUT, CW)
-    tail = shards([(438, 138), (482, 150), (508, 222), (508, 332), (492, 422), (462, 432), (474, 330), (470, 222), (452, 172)], ["#e2622a", "#ec7a38", "#c94a1f", "#f08a40"], 34, 3, T_GROUT)
-    head = shards([(35, 140), (110, 110), (190, 95), (260, 120), (300, 200), (312, 290), (292, 362), (232, 402), (120, 412), (58, 382), (28, 300), (24, 210)], ORANGE, 36, 3, T_GROUT, OW)
-    head += shards([(18, 108), (60, 92), (106, 108), (96, 152), (44, 152)], ["#e2622a", "#f08a40", "#c94a1f"], 28, 2.6, T_GROUT)
-    head += shards([(184, 84), (250, 78), (272, 110), (236, 142), (194, 126)], ["#e2622a", "#f08a40", "#c94a1f"], 28, 2.6, T_GROUT)
-    head += shards([(200, 300), (282, 290), (332, 330), (322, 392), (250, 402), (206, 360)], ["#8e1622", "#b3202c", "#6e1018", "#2a3a8a"], 30, 2.6, T_GROUT, [4, 3, 2, 1])
-    teeth = ""
-    for i, x in enumerate(range(66, 336, 40)):
-        h = 66 if i % 2 == 0 else 54
-        tooth = [(x, 382), (x + 38, 378), (x + 34, 378 + h * .8), (x + 19, 382 + h), (x + 4, 378 + h * .85)]
-        teeth += shards(tooth, ["#f1e6cc", "#e8d8b4", "#f7efdc"], 60, 6, T_GROUT)
-    # eyes: big white glass, flat-topped like in the original, each nipped into a few pieces
-    eyes = "".join(shards(ngon(x, y, 38, 42, 11, flat_top=16), ["#f4f8fb", "#e6eef4", "#ffffff"], 50, 5, T_GROUT) for x, y in ((112, 284), (182, 276)))
-    pupils = ""
-    head_g = rot_group(head + teeth + eyes + pupils, -7, 7, 190, 400)
-    tail_g = rot_group(tail, -14, 12, 458, 150)
-    breathe = f'<g>{anim_translate([(390, 380)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1, lerp(0.97, 1.04, ease(u)))))}<g transform="translate(-390 -380)">{body}</g></g></g>'
-    return bg + tail_g + breathe + head_g
+    """traced from Vladimir's photo of the tiger mosaic: tiger_shards.json holds every shard (523x523 px)"""
+    import json, os
+    data = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tiger_shards.json")))
+    groups = {"bg": [], "head": [], "body": [], "tail": []}
+    for sh in data["polys"]:
+        groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
+    g = {k: "".join(v) for k, v in groups.items()}
+    head_g = rot_group(g["head"], -4, 4, 180, 440)
+    tail_g = rot_group(g["tail"], -6, 5, 452, 120)
+    body_g = f'<g>{anim_translate([(380, 400)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1, lerp(0.98, 1.03, ease(u)))))}<g transform="translate(-380 -400)">{g["body"]}</g></g></g>'
+    return (f'<g transform="scale({520 / 523:.4f})"><rect width="523" height="523" fill="{data["grout"]}"/>'
+            f'{g["bg"]}{tail_g}{body_g}{head_g}</g>')
 
 
 # ---------- wall ----------
@@ -321,17 +313,18 @@ def board(x0, y0, x1, y1, hx0, hx1, hy, hole, wood, deep, win):
     grain = "".join(f'<path d="M{x0 + 8},{y} q{(x1 - x0) / 3},{random.uniform(-6, 6)} {x1 - x0 - 16},{random.uniform(-4, 4)}" stroke="{deep}" stroke-opacity=".35" stroke-width="{random.uniform(1, 2.5):.1f}" fill="none"/>'
                     for y in range(int(y0) + 20, int(y1) - 10, 26))
     wx0, wy0, wx1, wy1 = win
-    return (f'<g filter="url(#shadow)"><path d="{path}" fill="url(#{gid})"/>{grain}'
+    return (f'<g><path d="{path}" transform="translate(6 10)" fill="#2a1a10" fill-opacity=".22"/><path d="{path}" fill="url(#{gid})"/>{grain}'
             f'<circle cx="{hole[0]}" cy="{hole[1]}" r="12" fill="#3b2a1c"/>'
             f'<rect x="{wx0 - 6}" y="{wy0 - 6}" width="{wx1 - wx0 + 12}" height="{wy1 - wy0 + 12}" rx="4" fill="{deep}"/></g>')
 
 
 def card(x, y, w, h, rot, fill, extra=""):
-    return f'<g transform="rotate({rot} {x + w / 2} {y + h / 2})" filter="url(#soft)"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="3" fill="{fill}"/>{extra}</g>'
+    return (f'<g transform="rotate({rot} {x + w / 2} {y + h / 2})"><rect x="{x + 3}" y="{y + 5}" width="{w}" height="{h}" rx="3" fill="#2a1a10" fill-opacity=".18"/>'
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="3" fill="{fill}"/>{extra}</g>')
 
 
 def pin(x, y, rot, color="#d9b27c", dark="#a98252"):
-    return (f'<g transform="rotate({rot} {x} {y})" filter="url(#soft)"><rect x="{x - 9}" y="{y - 60}" width="18" height="120" rx="4" fill="{color}"/>'
+    return (f'<g transform="rotate({rot} {x} {y})"><rect x="{x - 9}" y="{y - 60}" width="18" height="120" rx="4" fill="{color}"/>'
             f'<rect x="{x - 1}" y="{y - 60}" width="2" height="120" fill="{dark}"/><rect x="{x - 10}" y="{y - 8}" width="20" height="10" fill="{dark}" opacity=".6"/></g>')
 
 
