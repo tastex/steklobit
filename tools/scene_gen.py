@@ -37,47 +37,155 @@ def clip_half(poly, a, b, c):
     return out
 
 
-def voronoi(x0, y0, x1, y1, step, jitter=0.45):
-    seeds = []
-    y = y0 - step / 2
-    row = 0
-    while y < y1 + step:
-        x = x0 - step / 2 + (step / 2 if row % 2 else 0)
-        while x < x1 + step:
-            seeds.append((x + random.uniform(-1, 1) * step * jitter, y + random.uniform(-1, 1) * step * jitter))
-            x += step
-        y += step * 0.87
-        row += 1
-    cells = []
-    box = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    for i, (px, py) in enumerate(seeds):
-        if not (x0 - step < px < x1 + step and y0 - step < py < y1 + step):
-            continue
-        poly = box[:]
-        for j, (qx, qy) in enumerate(seeds):
-            if i == j or abs(qx - px) > step * 2.6 or abs(qy - py) > step * 2.6:
+def area(poly):
+    return 0.5 * sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly)))
+
+
+def ccw(poly):
+    return poly if area(poly) > 0 else poly[::-1]
+
+
+def is_convex(poly):
+    n = len(poly)
+    for i in range(n):
+        (ax, ay), (bx, by), (cx, cy) = poly[i - 1], poly[i], poly[(i + 1) % n]
+        if (bx - ax) * (cy - by) - (by - ay) * (cx - bx) < -1e-6:
+            return False
+    return True
+
+
+def inside_tri(p, a, b, c):
+    def s(p1, p2, p3):
+        return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+    d1, d2, d3 = s(p, a, b), s(p, b, c), s(p, c, a)
+    return (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
+
+
+def convex_parts(poly):
+    """ear-clip a simple polygon, then greedily merge triangles back into convex pieces"""
+    poly = ccw(poly)
+    if is_convex(poly):
+        return [poly]
+    idx = list(range(len(poly)))
+    tris = []
+    guard = 0
+    while len(idx) > 3 and guard < 5000:
+        guard += 1
+        for k in range(len(idx)):
+            i0, i1, i2 = idx[k - 1], idx[k], idx[(k + 1) % len(idx)]
+            a, b, c = poly[i0], poly[i1], poly[i2]
+            if (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) <= 0:
                 continue
-            a, b = qx - px, qy - py
-            c = (qx * qx + qy * qy - px * px - py * py) / 2
-            poly = clip_half(poly, a, b, c)
-            if not poly:
+            if any(inside_tri(poly[j], a, b, c) for j in idx if j not in (i0, i1, i2)):
+                continue
+            tris.append([i0, i1, i2])
+            idx.pop(k)
+            break
+    tris.append(idx[:])
+    pieces = tris
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(pieces)):
+            for j in range(i + 1, len(pieces)):
+                A, B = pieces[i], pieces[j]
+                for ka in range(len(A)):
+                    u, v = A[ka], A[(ka + 1) % len(A)]
+                    if v in B and B[(B.index(v) + 1) % len(B)] == u:
+                        kb = B.index(v)
+                        cand = A[:ka + 1] + [B[(kb + t) % len(B)] for t in range(2, len(B))] + A[ka + 1:]
+                        if is_convex([poly[q] for q in cand]):
+                            pieces[i] = cand
+                            pieces.pop(j)
+                            merged = True
+                        break
+                if merged:
+                    break
+            if merged:
                 break
-        if len(poly) >= 3:
-            cells.append(poly)
-    return cells
+    return [[poly[q] for q in p] for p in pieces]
+
+
+def centroid(poly):
+    return sum(p[0] for p in poly) / len(poly), sum(p[1] for p in poly) / len(poly)
+
+
+def cut(poly, target, depth=0):
+    """split a convex polygon with random straight cuts, like nipping glass"""
+    if abs(area(poly)) < target * random.uniform(0.7, 1.5) or depth > 14:
+        return [poly]
+    cx, cy = centroid(poly)
+    # cut across the longer side of the piece so shards stay chunky
+    best, ang0 = 0, 0
+    for i in range(len(poly)):
+        for j in range(i + 1, len(poly)):
+            d = math.hypot(poly[j][0] - poly[i][0], poly[j][1] - poly[i][1])
+            if d > best:
+                best, ang0 = d, math.atan2(poly[j][1] - poly[i][1], poly[j][0] - poly[i][0])
+    ang = ang0 + random.uniform(-0.6, 0.6)            # cut line normal follows the long axis
+    nx, ny = math.cos(ang), math.sin(ang)
+    off = random.uniform(-0.25, 0.25) * best
+    c = nx * cx + ny * cy + off * 0.5
+    left = clip_half(poly, nx, ny, c)
+    right = clip_half(poly, -nx, -ny, -c)
+    if len(left) < 3 or len(right) < 3 or min(abs(area(left)), abs(area(right))) < target * 0.38:
+        return [poly]
+    return cut(left, target, depth + 1) + cut(right, target, depth + 1)
+
+
+def inset(poly, g):
+    """offset a convex ccw polygon inwards by g (the grout line)"""
+    poly = ccw(poly)
+    n = len(poly)
+    lines = []
+    for i in range(n):
+        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
+        dx, dy = bx - ax, by - ay
+        L = math.hypot(dx, dy)
+        if L < 1e-6:
+            continue
+        nx, ny = -dy / L, dx / L                     # inward normal for ccw
+        lines.append((ax + nx * g, ay + ny * g, dx, dy))
+    out = []
+    for i in range(len(lines)):
+        x1, y1, dx1, dy1 = lines[i - 1]
+        x2, y2, dx2, dy2 = lines[i]
+        den = dx1 * dy2 - dy1 * dx2
+        if abs(den) < 1e-9:
+            continue
+        t = ((x2 - x1) * dy2 - (y2 - y1) * dx2) / den
+        out.append((x1 + dx1 * t, y1 + dy1 * t))
+    if len(out) < 3 or area(out) <= 0 or not is_convex(out):
+        return None
+    cx, cy = centroid(poly)
+    if any(math.hypot(p[0] - cx, p[1] - cy) > 3 * math.sqrt(abs(area(poly))) for p in out):
+        return None
+    return out
 
 
 def shrink(poly, gap):
-    cx = sum(p[0] for p in poly) / len(poly)
-    cy = sum(p[1] for p in poly) / len(poly)
+    cx, cy = centroid(poly)
     r = sum(math.hypot(p[0] - cx, p[1] - cy) for p in poly) / len(poly)
     k = max(0.2, 1 - gap / max(r, 0.1))
     return [(cx + (p[0] - cx) * k, cy + (p[1] - cy) * k) for p in poly]
 
 
-def bbox(poly):
-    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
-    return min(xs), min(ys), max(xs), max(ys)
+def ngon(cx, cy, rx, ry, n=14, flat_top=0):
+    pts_ = []
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        x, y = cx + rx * math.cos(a), cy + ry * math.sin(a)
+        if flat_top and y < cy - ry + flat_top:
+            y = cy - ry + flat_top
+        if not pts_ or math.hypot(x - pts_[-1][0], y - pts_[-1][1]) > 1:
+            pts_.append((x, y))
+    return pts_
+
+
+def tint(hex_, k):
+    r, g, b = int(hex_[1:3], 16), int(hex_[3:5], 16), int(hex_[5:7], 16)
+    mix = lambda v: max(0, min(255, int(v + (255 - v) * k if k > 0 else v * (1 + k))))
+    return f"#{mix(r):02x}{mix(g):02x}{mix(b):02x}"
 
 
 uid = 0
@@ -85,24 +193,24 @@ defs = []
 
 
 def shards(shape, colors, step, gap, grout, weights=None):
-    """shape is a polygon (list) or ('circle', cx, cy, r); returns svg for a grouted mosaic patch"""
-    global uid
-    uid += 1
-    cid = f"c{uid}"
-    if isinstance(shape, tuple):
-        _, cx, cy, r = shape
-        defs.append(f'<clipPath id="{cid}"><circle cx="{f(cx)}" cy="{f(cy)}" r="{f(r)}"/></clipPath>')
-        bb = (cx - r, cy - r, cx + r, cy + r)
-        base = f'<circle cx="{f(cx)}" cy="{f(cy)}" r="{f(r)}" fill="{grout}"/>'
-    else:
-        defs.append(f'<clipPath id="{cid}"><polygon points="{pts(shape)}"/></clipPath>')
-        bb = bbox(shape)
-        base = f'<polygon points="{pts(shape)}" fill="{grout}"/>'
+    """a grouted patch of glass: the shape is nipped into shards whose outer edges follow its outline"""
+    target = step * step * 1.3
+    base = []
     body = []
-    for cell in voronoi(*bb, step):
-        col = random.choices(colors, weights=weights)[0] if weights else random.choice(colors)
-        body.append(f'<polygon points="{pts(shrink(cell, gap))}" fill="{col}"/>')
-    return f'<g>{base}<g clip-path="url(#{cid})">{"".join(body)}</g></g>'
+    for part in convex_parts(shape):
+        base.append(f'<polygon points="{pts(part)}" fill="{grout}"/>')
+        for piece in cut(part, target):
+            sh = inset(piece, gap / 2) or shrink(piece, gap / 2)
+            col = random.choices(colors, weights=weights)[0] if weights else random.choice(colors)
+            col = tint(col, random.uniform(-0.08, 0.08))
+            body.append(f'<polygon points="{pts(sh)}" fill="{col}"/>')
+            # a thin sheen on some shards, like light catching the glass
+            if len(sh) >= 3 and random.random() < 0.35:
+                a, b = sh[0], sh[1]
+                cx, cy = centroid(sh)
+                streak = [a, b, ((b[0] * 2 + cx) / 3, (b[1] * 2 + cy) / 3), ((a[0] * 2 + cx) / 3, (a[1] * 2 + cy) / 3)]
+                body.append(f'<polygon points="{pts(streak)}" fill="#fff" fill-opacity=".14"/>')
+    return f'<g>{"".join(base)}{"".join(body)}</g>'
 
 
 def anim_rotate(angles, cx, cy):
@@ -157,7 +265,7 @@ def dragon():
     head += shards([(38, 94), (100, 104), (102, 142)], RED, 24, 2, D_GROUT)
     for crest in ([(148, 82), (158, 42), (178, 84)], [(178, 82), (194, 58), (204, 94)], [(202, 94), (226, 80), (214, 114)]):
         head += shards(crest, RED, 22, 2, D_GROUT)
-    head += f'<circle cx="138" cy="128" r="9" fill="{D_GROUT}"/><circle cx="138" cy="128" r="5.5" fill="#f7f9fc"/>'
+    head += shards(ngon(138, 128, 11, 9, 7), ["#f7f9fc", "#e9eef6"], 40, 3, D_GROUT)
 
     # head: sways and turns its beak from left to right half-way through the move
     head_turn = f'<g>{anim_translate([(160, 140)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1 if u < 0.5 else -1, 1)))}<g transform="translate(-160 -140)">{head}</g></g></g>'
@@ -190,12 +298,13 @@ def tiger():
     head += shards([(184, 84), (250, 78), (272, 110), (236, 142), (194, 126)], ["#e2622a", "#f08a40", "#c94a1f"], 28, 2.6, T_GROUT)
     head += shards([(200, 300), (282, 290), (332, 330), (322, 392), (250, 402), (206, 360)], ["#8e1622", "#b3202c", "#6e1018", "#2a3a8a"], 30, 2.6, T_GROUT, [4, 3, 2, 1])
     teeth = ""
-    for i, x in enumerate(range(72, 340, 34)):
-        h = 58 if i % 2 == 0 else 48
-        teeth += f'<polygon points="{pts([(x, 384), (x + 28, 380), (x + 26, 384 + h), (x + 4, 386 + h)])}" fill="{random.choice(["#f1e6cc", "#e8d8b4", "#f7efdc"])}" stroke="{T_GROUT}" stroke-width="3"/>'
-    eyes = "".join(f'<ellipse cx="{x}" cy="{y}" rx="34" ry="38" fill="{T_GROUT}"/><ellipse cx="{x}" cy="{y}" rx="29" ry="33" fill="#f2f7fb"/>' for x, y in ((112, 282), (180, 274)))
-    pupils = f'<g>{anim_translate(poses(lambda u: (lerp(-6, 6, ease(u)), lerp(2, -2, ease(u)))))}' \
-             + "".join(f'<circle cx="{x}" cy="{y + 6}" r="9" fill="#1b1310"/>' for x, y in ((112, 282), (180, 274))) + "</g>"
+    for i, x in enumerate(range(66, 336, 40)):
+        h = 66 if i % 2 == 0 else 54
+        tooth = [(x, 382), (x + 38, 378), (x + 34, 378 + h * .8), (x + 19, 382 + h), (x + 4, 378 + h * .85)]
+        teeth += shards(tooth, ["#f1e6cc", "#e8d8b4", "#f7efdc"], 60, 6, T_GROUT)
+    # eyes: big white glass, flat-topped like in the original, each nipped into a few pieces
+    eyes = "".join(shards(ngon(x, y, 38, 42, 11, flat_top=16), ["#f4f8fb", "#e6eef4", "#ffffff"], 50, 5, T_GROUT) for x, y in ((112, 284), (182, 276)))
+    pupils = ""
     head_g = rot_group(head + teeth + eyes + pupils, -7, 7, 190, 400)
     tail_g = rot_group(tail, -14, 12, 458, 150)
     breathe = f'<g>{anim_translate([(390, 380)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1, lerp(0.97, 1.04, ease(u)))))}<g transform="translate(-390 -380)">{body}</g></g></g>'
