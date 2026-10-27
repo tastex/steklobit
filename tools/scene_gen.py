@@ -228,6 +228,17 @@ def anim_scale(scales):
     return f'<animateTransform attributeName="transform" type="scale" values="{vals}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/>'
 
 
+def breathe(k, period):
+    """smooth swell and back (not stop-motion), so breathing reads as calm"""
+    return (f'<animateTransform attributeName="transform" type="scale" values="1 1;{f(k)} {f(k)};1 1" keyTimes="0;0.5;1" '
+            f'calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1" dur="{f(period)}s" repeatCount="indefinite"/>')
+
+
+def about(inner_anim, cx, cy, inner):
+    """apply a scale animation around the point (cx, cy)"""
+    return f'<g transform="translate({f(cx)} {f(cy)})"><g>{inner_anim}<g transform="translate({f(-cx)} {f(-cy)})">{inner}</g></g></g>'
+
+
 def poses(fn):
     return [fn(p / 9) for p in SEQ]
 
@@ -250,6 +261,9 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
+HEAD_CX = 262
+
+
 def dragon():
     """traced from Vladimir's photo of the dragon mosaic: dragon_shards.json holds every shard (500x500)"""
     import json, os
@@ -258,7 +272,9 @@ def dragon():
     for sh in data["polys"]:
         groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
-    head_g = rot_group(g["head"], -8, 8, 250, 190)
+    # the head looks right, turns through a squashed profile and looks left, then back
+    turn = poses(lambda u: (lerp(1, 0.45, u * 2) if u < 0.5 else lerp(-0.45, -1, u * 2 - 1), 1))
+    head_g = about(anim_scale(turn), HEAD_CX, 150, g["head"])
     wing_g = rot_group(g["wing"], 10, -14, 352, 292)
     tail_g = rot_group(g["tail"], -7, 9, 300, 360)
     legs_g = rot_group(g["legs"], -5, 5, 220, 400)
@@ -287,7 +303,7 @@ def tiger():
     head_g = rot_group(g["head"], -4, 4, 180, 440)
     tail_g = rot_group(g["tail"], -6, 5, 452, 120)
     # breathing: only the body swells a little, the head stays as it is
-    body_g = f'<g>{anim_translate([(360, 262)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (lerp(1, 1.06, ease(u)), lerp(1, 1.06, ease(u)))))}<g transform="translate(-360 -262)">{g["body"]}</g></g></g>'
+    body_g = about(breathe(1.045, DUR * 2), 360, 262, g["body"])
     return (f'<g transform="scale({520 / 523:.4f})"><rect width="523" height="523" fill="{data["grout"]}"/>'
             f'{g["bg"]}{tail_g}{body_g}{head_g}</g>')
 
