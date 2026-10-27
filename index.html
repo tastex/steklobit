@@ -144,7 +144,7 @@ body.clean .shade{opacity:0}
 <body>
 <video id="bgBlur" muted loop playsinline preload="none" aria-hidden="true" hidden></video>
 <video id="bg" muted loop playsinline preload="none"></video>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 1080" id="vec" hidden role="img" aria-label="Стена с мозаиками: дракон и тигр в деревянных рамках">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 1080" id="vec" role="img" aria-label="Стена с мозаиками: дракон и тигр в деревянных рамках">
 <defs>
 <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8e5df"/><stop offset="1" stop-color="#dcd6cc"/></linearGradient>
 <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d8fd6"/><stop offset="1" stop-color="#3a6bb8"/></linearGradient>
@@ -432,7 +432,7 @@ function fitBox(el, vw, vh, own){
 }
 function applyBg(){
   const useVec = drawn || !hasVideo;
-  vec.hidden = !useVec;
+  vec.style.display = useVec ? '' : 'none';   // <svg> has no .hidden property
   video.style.opacity = useVec ? '0' : '';
   document.getElementById('fallback').hidden = true;
   if (!videoLoading) document.getElementById('bgMode').textContent = drawn ? 'Показать видео' : 'Показать рисунок';
