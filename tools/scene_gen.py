@@ -251,31 +251,19 @@ D_GROUT = "#e4e9f1"
 
 
 def dragon():
-    bg = shards([(0, 0), (500, 0), (500, 500), (0, 500)],
-                ["#e9eef6", "#dfe4f0", "#f4f6fa", "#d6dcec", "#ccd3e6", "#eef0f7"], 70, 3, "#c9cfde")
-    tail = shards([(196, 340), (262, 346), (324, 376), (384, 408), (402, 432), (382, 458), (316, 452), (254, 432), (198, 404)], GREEN, 34, 2.4, D_GROUT) \
-        + shards([(368, 414), (410, 402), (428, 430), (406, 462), (370, 455)], RED, 26, 2.2, D_GROUT)
-    leg1 = shards([(165, 378), (202, 384), (196, 440), (176, 452), (148, 446), (166, 420)], GREEN, 28, 2.2, D_GROUT)
-    leg2 = shards([(238, 392), (276, 388), (292, 446), (266, 462), (244, 456)], GREEN, 28, 2.2, D_GROUT)
-    body = shards([(105, 188), (180, 212), (240, 238), (282, 300), (272, 360), (222, 392), (160, 386), (110, 352), (74, 300), (68, 248)], GREEN, 36, 2.4, D_GROUT)
-    for spike in ([(76, 232), (50, 248), (82, 256)], [(70, 270), (44, 286), (76, 294)], [(72, 306), (48, 324), (82, 328)]):
-        body += shards(spike, GREEN, 22, 2, D_GROUT)
-    wing = shards([(226, 236), (300, 232), (372, 250), (436, 266), (470, 286), (432, 310), (362, 334), (290, 346), (244, 318)], GREEN, 34, 2.4, D_GROUT)
-    head = shards([(95, 110), (130, 84), (176, 74), (216, 94), (232, 140), (216, 190), (180, 216), (140, 206), (104, 176), (88, 140)], GREEN, 34, 2.4, D_GROUT)
-    head += shards([(38, 94), (100, 104), (102, 142)], RED, 24, 2, D_GROUT)
-    for crest in ([(148, 82), (158, 42), (178, 84)], [(178, 82), (194, 58), (204, 94)], [(202, 94), (226, 80), (214, 114)]):
-        head += shards(crest, RED, 22, 2, D_GROUT)
-    head += shards(ngon(138, 128, 11, 9, 7), ["#f7f9fc", "#e9eef6"], 40, 3, D_GROUT)
-
-    # head: sways and turns its beak from left to right half-way through the move
-    head_turn = f'<g>{anim_translate([(160, 140)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1 if u < 0.5 else -1, 1)))}<g transform="translate(-160 -140)">{head}</g></g></g>'
-    head_g = rot_group(head_turn, -14, 12, 172, 205)
-    wing_g = rot_group(wing, 12, -22, 246, 282)
-    tail_g = rot_group(tail, -10, 12, 212, 372)
-    leg1_g = rot_group(leg1, -8, 6, 182, 384)
-    leg2_g = rot_group(leg2, 6, -8, 256, 392)
-    figure = rot_group(tail_g + leg1_g + leg2_g + body + wing_g + head_g, -5, 5, 200, 440)
-    return bg + figure
+    """traced from Vladimir's photo of the dragon mosaic: dragon_shards.json holds every shard (500x500)"""
+    import json, os
+    data = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dragon_shards.json")))
+    groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
+    for sh in data["polys"]:
+        groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
+    g = {k: "".join(v) for k, v in groups.items()}
+    head_g = rot_group(g["head"], -8, 8, 250, 190)
+    wing_g = rot_group(g["wing"], 10, -14, 352, 292)
+    tail_g = rot_group(g["tail"], -7, 9, 300, 360)
+    legs_g = rot_group(g["legs"], -5, 5, 220, 400)
+    figure = rot_group(tail_g + legs_g + g["body"] + wing_g + head_g, -3, 3, 240, 450)
+    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{figure}'
 
 
 # ---------- tiger (local 520x520 window) ----------
@@ -298,7 +286,8 @@ def tiger():
     g = {k: "".join(v) for k, v in groups.items()}
     head_g = rot_group(g["head"], -4, 4, 180, 440)
     tail_g = rot_group(g["tail"], -6, 5, 452, 120)
-    body_g = f'<g>{anim_translate([(380, 400)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (1, lerp(0.98, 1.03, ease(u)))))}<g transform="translate(-380 -400)">{g["body"]}</g></g></g>'
+    # breathing: only the body swells a little, the head stays as it is
+    body_g = f'<g>{anim_translate([(360, 262)] * len(SEQ))}<g>{anim_scale(poses(lambda u: (lerp(1, 1.06, ease(u)), lerp(1, 1.06, ease(u)))))}<g transform="translate(-360 -262)">{g["body"]}</g></g></g>'
     return (f'<g transform="scale({520 / 523:.4f})"><rect width="523" height="523" fill="{data["grout"]}"/>'
             f'{g["bg"]}{tail_g}{body_g}{head_g}</g>')
 
@@ -306,7 +295,8 @@ def tiger():
 # ---------- wall ----------
 def board(x0, y0, x1, y1, hx0, hx1, hy, hole, wood, deep, win):
     r = 14
-    path = (f"M{x0 + r},{y0} H{hx0} V{hy + 24} Q{hx0},{hy} {hx0 + 24},{hy} H{hx1 - 24} Q{hx1},{hy} {hx1},{hy + 24} V{y0} "
+    F, R = 46, 24     # cutting-board shape: wide fillets where the handle meets the board, rounded handle top
+    path = (f"M{x0 + r},{y0} H{hx0 - F} Q{hx0},{y0} {hx0},{y0 - F} V{hy + R} Q{hx0},{hy} {hx0 + R},{hy} H{hx1 - R} Q{hx1},{hy} {hx1},{hy + R} V{y0 - F} Q{hx1},{y0} {hx1 + F},{y0} "
             f"H{x1 - r} Q{x1},{y0} {x1},{y0 + r} V{y1 - r} Q{x1},{y1} {x1 - r},{y1} H{x0 + r} Q{x0},{y1} {x0},{y1 - r} V{y0 + r} Q{x0},{y0} {x0 + r},{y0} Z")
     gid = f"w{x0}"
     defs.append(f'<linearGradient id="{gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{wood}"/><stop offset="1" stop-color="{deep}"/></linearGradient>')
