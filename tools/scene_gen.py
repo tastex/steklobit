@@ -261,45 +261,29 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
-NECK = (85, 88)   # neck pieces in dragon_shards.json that only belong to the right-looking pose (photo 2 has none there)
-
-
 def dragon():
-    """traced from Vladimir's photos of the dragon mosaic: dragon_shards.json is every piece of the first photo
-    (looking right), dragon_pose2.json the head from the second photo (looking left) plus light filler glass
-    for the spot the right-looking head leaves bare"""
+    """traced from Vladimir's photo of the dragon mosaic (dragon_shards.json), moved like the first drawn dragon:
+    the whole head sways and turns its beak from one side to the other, the wing flaps, tail and legs swing.
+    dragon_pose2.json adds light filler glass for the spots the turning head leaves bare."""
     import json, os
     here = os.path.dirname(os.path.abspath(__file__))
     data = json.load(open(os.path.join(here, "dragon_shards.json")))
-    pose2 = json.load(open(os.path.join(here, "dragon_pose2.json")))
+    filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
+                     for sh in json.load(open(os.path.join(here, "dragon_pose2.json")))["filler"])
     groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
-    neck = ""
-    for i, sh in enumerate(data["polys"]):
-        if i in NECK:
-            neck += f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>'
-            continue
+    for sh in data["polys"]:
         groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
     g = {k: "".join(v) for k, v in groups.items()}
-    filler = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["filler"])
-    head2 = "".join(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in pose2["head"])
-    # as in the video: looking left for frames 0-7 and 15-17, right for 8-14; the head is re-laid in one go
+    # as in the video the beak points left for frames 0-7 and 15-17 and right for 8-14 (the photo looks right)
     left = [i < 8 or i > 14 for i in range(len(SEQ))]
-    # small tilt every frame, and a nod (beak dropping) just before each turn; minus lowers a left-looking beak
-    nod = [0, -3, -8, -4, 0, -3, -10, -14, 7, 4, 0, 2, 0, 4, 8, -6, -2, 0]
-
-    def shown(on):
-        keys = [0] + [i for i in range(1, len(on)) if on[i] != on[i - 1]]
-        vals = ";".join("visible" if on[k] else "hidden" for k in keys)
-        times = ";".join(f"{k / len(on):.4f}" for k in keys)
-        return f'<animate attributeName="visibility" values="{vals}" keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/>'
-    head_g = (f'<g>{shown([not l for l in left])}<g>{anim_rotate(nod, 250, 190)}{g["head"]}</g>{neck}</g>'
-              f'<g>{shown(left)}<g>{anim_rotate(nod, 150, 165)}{head2}</g></g>')
-    # the rest stays the glass of the first photo, nudged a little every frame
-    wing_g = rot_group(g["wing"], 12, -16, 352, 292)
-    tail_g = rot_group(g["tail"], -7, 9, 300, 360)
-    legs_g = rot_group(g["legs"], -5, 5, 220, 400)
-    figure = rot_group(tail_g + legs_g + g["body"] + wing_g, -2, 2, 240, 450)
-    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{filler}{figure}{head_g}'
+    head_turn = (f'<g>{anim_translate([(250, 140)] * len(SEQ))}<g>{anim_scale([(-1, 1) if l else (1, 1) for l in left])}'
+                 f'<g transform="translate(-250 -140)">{g["head"]}</g></g></g>')
+    head_g = rot_group(head_turn, -12, 12, 225, 200)
+    wing_g = rot_group(g["wing"], 12, -22, 352, 292)
+    tail_g = rot_group(g["tail"], -10, 12, 300, 360)
+    legs_g = rot_group(g["legs"], -6, 6, 220, 400)
+    figure = rot_group(tail_g + legs_g + g["body"] + wing_g + head_g, -5, 5, 240, 450)
+    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{filler}{figure}'
 
 
 # ---------- tiger (local 520x520 window) ----------
