@@ -287,7 +287,10 @@ def dragon():
     head_turn = (f'<g>{anim_translate([(TURN_X + TURN_DX, 140 + TURN_DY) if l else (TURN_X, 140) for l in left])}'
                  f'<g>{anim_scale([(-1, 1) if l else (1, 1) for l in left])}'
                  f'<g transform="translate({-TURN_X} -140)">{g["head"]}</g></g></g>')
-    head_g = rot_group(head_turn, -12, 12, 225, 200)
+    # tilt per frame: the beak stays raised as on the photos, dipping only a little just before each turn
+    # (plus lifts a left-pointing beak, minus a right-pointing one)
+    tilt = [14, 16, 18, 16, 14, 12, 8, 6, -12, -10, -8, -10, -12, -8, -4, 10, 12, 14]
+    head_g = f'<g>{anim_rotate(tilt, 215, 200)}{head_turn}</g>'
     wing_g = rot_group(g["wing"], 12, -22, 352, 292)
     tail_g = rot_group(g["tail"], -10, 12, 300, 360)
     legs_g = rot_group(g["legs"], -6, 6, 220, 400)
