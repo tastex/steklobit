@@ -261,30 +261,29 @@ RED = ["#b3202c", "#8e1622", "#c8323a"]
 D_GROUT = "#e4e9f1"
 
 
-HEAD_CX = 262
-
-
 def dragon():
-    """traced from Vladimir's photo of the dragon mosaic: dragon_shards.json holds every shard (500x500)"""
+    """traced from Vladimir's two photos of the dragon mosaic: dragon_morph.json holds every glass piece
+    in both poses (a: looking right, b: looking left, same piece order); frame by frame each piece
+    slides from one place to the other, like moving the glass by hand for stop-motion"""
     import json, os
-    data = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dragon_shards.json")))
-    groups = {"bg": [], "head": [], "body": [], "wing": [], "tail": [], "legs": []}
-    for sh in data["polys"]:
-        groups[sh["part"]].append(f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>')
-    g = {k: "".join(v) for k, v in groups.items()}
-    # as in the video: the head looks up-left for frames 0-7 and 15-17, then snaps round to the right
-    # for frames 8-14 while the wing lifts (the traced photo is the right-looking pose)
-    look_left = [i < 8 or i > 14 for i in range(len(SEQ))]
-    flip = [(-1, 1) if l else (1, 1) for l in look_left]
-    lift = [(-14, -10) if l else (0, 0) for l in look_left]
-    tilt = [8 if l else 0 for l in look_left]
-    head_g = (f'<g>{anim_translate(lift)}<g>{anim_rotate(tilt, HEAD_CX, 150)}'
-              f'{about(anim_scale(flip), HEAD_CX, 150, g["head"])}</g></g>')
-    wing_g = f'<g>{anim_rotate([16 if l else 0 for l in look_left], 352, 292)}{g["wing"]}</g>'
-    tail_g = rot_group(g["tail"], -7, 9, 300, 360)
-    legs_g = rot_group(g["legs"], -5, 5, 220, 400)
-    figure = rot_group(tail_g + legs_g + g["body"] + wing_g + head_g, -3, 3, 240, 450)
-    return f'<rect width="500" height="500" fill="{data["grout"]}"/>{g["bg"]}{figure}'
+    data = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dragon_morph.json")))
+    # pose blend per video frame: 0 = looking right (photo 1), 1 = looking left (photo 2)
+    U = [1, 1, 1, 1, .75, .5, .25, 0, 0, 0, 0, 0, .25, .5, .75, 1, 1, 1]
+    # the head does not slide through the middle: it is re-laid in one go halfway through, as in the video
+    U_HEAD = [1 if u >= .5 else 0 for u in U]
+    out = [f'<rect width="500" height="500" fill="{data["grout"]}"/>']
+    out += [f'<polygon points="{pts(sh["p"])}" fill="{sh["c"]}"/>' for sh in data["bg"]]
+    for sh in data["shards"]:
+        us = U_HEAD if sh["part"] == "head" else U
+        keys = [0] + [i for i in range(1, len(us)) if us[i] != us[i - 1]]
+        times = ";".join(f"{k / len(us):.4f}" for k in keys)
+
+        def at(u):
+            return pts([(lerp(x0, x1, u), lerp(y0, y1, u)) for (x0, y0), (x1, y1) in zip(sh["a"], sh["b"])])
+        vals = ";".join(at(us[k]) for k in keys)
+        out.append(f'<polygon points="{at(us[0])}" fill="{sh["c"]}"><animate attributeName="points" values="{vals}" '
+                   f'keyTimes="{times}" dur="{f(DUR)}s" calcMode="discrete" repeatCount="indefinite"/></polygon>')
+    return "".join(out)
 
 
 # ---------- tiger (local 520x520 window) ----------
