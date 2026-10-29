@@ -199,7 +199,7 @@ body.clean .shade{opacity:0}
         <option value="4">4 такта</option><option value="8" selected>8 тактов</option><option value="16">16 тактов</option><option value="32">32 такта</option>
       </select>
       <button class="chip main" id="export" type="button">Скачать бит</button>
-      <button class="chip main" id="share" type="button">Скопировать ссылку</button>
+      <button class="chip main" id="share" type="button">Поделиться ссылкой</button>
       <span class="act-note" id="actNote" role="status"></span>
     </div>
     <div class="share-box" id="shareBox" hidden><input id="shareUrl" readonly aria-label="Текст со ссылкой на бит"><button class="chip" id="copy" type="button">Копировать</button></div>
@@ -767,7 +767,7 @@ addEventListener('hashchange', applyLink);
 
 const shareBox=document.getElementById('shareBox'), shareUrl=document.getElementById('shareUrl');
 const ownUrl = /^https?:$/.test(location.protocol) && /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
-/* the text with the link is copied at once; the field below keeps it in view in case the clipboard is blocked */
+/* the text with the link is copied at once (and offered to the phone's share menu); the field below keeps it in view in case the clipboard is blocked */
 async function copyMsg(){
   shareUrl.select();
   try { await navigator.clipboard.writeText(shareUrl.value); }
@@ -777,7 +777,9 @@ async function copyMsg(){
 document.getElementById('share').addEventListener('click', ()=>{
   const url = (ownUrl ? location.origin+location.pathname : PAGE_URL) + '#' + encodeBeat();
   shareUrl.value = SHARE_TEXT + ' ' + url; shareBox.hidden = false; shareUrl.focus();
-  copyMsg();
+  const copied = copyMsg();
+  if (navigator.share && matchMedia('(pointer: coarse)').matches)
+    navigator.share({title:'Стеклобит', text:shareUrl.value}).catch(()=>{}).then(()=>copied);
 });
 document.getElementById('copy').addEventListener('click', copyMsg);
 
