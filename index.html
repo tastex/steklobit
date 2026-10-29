@@ -160,6 +160,7 @@ body.clean .shade{opacity:0}
   <header>
     <h1 id="title" aria-label="Стеклобит">Стеклобит</h1>
     <div class="tools">
+      <button class="btn" id="vidBtn" type="button">Остановить видео</button>
       <button class="btn" id="clean" type="button">Скрыть панели</button>
     </div>
   </header>
@@ -180,6 +181,7 @@ body.clean .shade{opacity:0}
         <button class="chip" data-preset="bar" type="button">Барная стойка</button>
         <button class="chip" id="rand" type="button">Случайно</button>
         <button class="chip" id="clear" type="button">Очистить</button>
+        <button class="chip main" id="undo" type="button" hidden>Отменить</button>
       </div>
     </div>
     <div class="transport">
@@ -295,13 +297,14 @@ const parse = s => [...s].map(c => c==='x'?1:c==='o'?2:0);
 
 const KEY = 'steklobit:v2';
 let state = {
-  bpm:80, swing:0, reverb:.35, seqVol:.8,
+  bpm:80, swing:0, reverb:.35, seqVol:.8, loops:8, videoOff:false,
   mute:ROWS.map(()=>false),
   grid:padRows(PRESETS.video.rows.map(parse)),
   ch:Object.fromEntries(CHANNELS.map(c=>[c.id,{on:false,vol:.5}])),
 };
 try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.grid) state = {...state, ...s, grid:padRows(s.grid), mute:ROWS.map((_,i)=>!!(s.mute||[])[i]), ch:{...state.ch, ...s.ch}}; } catch(e){}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){} };
+addEventListener('pagehide', save);
 
 /* ---------- audio engine ---------- */
 const AC = window.AudioContext || window.webkitAudioContext;
@@ -484,7 +487,7 @@ function connectVideo(){
 }
 function applyChannel(id){
   const c = state.ch[id]; if (!ctx || !chGain[id]) return;
-  if (id==='video' && c.on){ connectVideo(); startVideo(); loadVideo(); }
+  if (id==='video' && c.on){ connectVideo(); if (state.videoOff){ state.videoOff=false; paintVidBtn(); } startVideo(); loadVideo(); }
   chGain[id].gain.setTargetAtTime(c.on ? c.vol : 0, ctx.currentTime, .25);
 }
 
@@ -512,7 +515,7 @@ layoutVideo();
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* with data saver on, the video is fetched only for the «Звук из видео» channel */
 const lean = !!(navigator.connection && navigator.connection.saveData);
-let videoLoading = null, wantPlay = !calm && !lean;
+let videoLoading = null, wantPlay = !calm && !lean && !state.videoOff;
 function startVideo(){
   wantPlay = true;
   if (video.getAttribute('src')) video.play().catch(()=>{});   // blocked autoplay (e.g. Low Power Mode): the next tap retries
@@ -525,7 +528,7 @@ function loadVideo(){
   else if (wantPlay) startVideo();
   return videoLoading;
 }
-if (!lean){ if (document.readyState==='complete') loadVideo(); else addEventListener('load', ()=>loadVideo(), {once:true}); }
+if (!lean && !state.videoOff){ if (document.readyState==='complete') loadVideo(); else addEventListener('load', ()=>loadVideo(), {once:true}); }
 const retry = ()=>{ if (wantPlay && video.paused && video.getAttribute('src')) video.play().catch(()=>{}); };
 addEventListener('pointerdown', retry); addEventListener('keydown', retry);
 /* battery: nothing plays in a hidden tab unless the video's own sound is on; on a low battery the poster stays */
@@ -533,10 +536,19 @@ const videoHeard = ()=>state.ch.video.on && ctx && ctx.state==='running';
 document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) retry(); else if (!videoHeard()) video.pause(); });
 if (navigator.getBattery) navigator.getBattery().then(b=>{
   const check = ()=>{ if (!b.charging && b.level<=.2 && !videoHeard()){ wantPlay=false; video.pause(); } };
-  check(); b.addEventListener('levelchange', check); b.addEventListener('chargingchange', ()=>{ if (b.charging && !calm && !lean){ wantPlay=true; retry(); } else check(); });
+  check(); b.addEventListener('levelchange', check); b.addEventListener('chargingchange', ()=>{ if (b.charging && !calm && !lean && !state.videoOff){ wantPlay=true; retry(); } else check(); });
 }).catch(()=>{});
 video.addEventListener('error', ()=>{ if (video.getAttribute('src')) { hasVideo=false; markVideoChannel(); } });
 video.addEventListener('loadeddata', ()=>{ hasVideo=true; markVideoChannel(); });
+/* the video can be stopped for good: only the still frame stays, nothing is decoded (remembered across reloads) */
+const vidBtn = document.getElementById('vidBtn');
+function paintVidBtn(){ vidBtn.textContent = state.videoOff ? 'Включить видео' : 'Остановить видео'; vidBtn.setAttribute('aria-pressed', state.videoOff); }
+vidBtn.addEventListener('click', ()=>{
+  state.videoOff = !state.videoOff; save(); paintVidBtn();
+  if (state.videoOff){ wantPlay = false; video.pause(); }
+  else { startVideo(); loadVideo(); }
+});
+paintVidBtn();
 /* while the beat plays, the mosaics keep its tempo: at 80 BPM exactly as in the video */
 function syncVideoRate(){ try { video.playbackRate = playing ? Math.min(2, Math.max(.5, state.bpm/80)) : 1; } catch(e){} }
 
@@ -554,9 +566,13 @@ CHANNELS.forEach(c=>{
   });
   vol.addEventListener('input', ()=>{ state.ch[c.id].vol=+vol.value; applyChannel(c.id); save(); });
   mixer.appendChild(el);
-  // never auto-start sound on load: browsers block it
-  state.ch[c.id].on = false; paintChannel(c.id);
+  paintChannel(c.id);
 });
+/* sounds that were on before a reload come back with the first tap or key: browsers allow sound only after one */
+if (CHANNELS.some(c=>state.ch[c.id].on)){
+  const wake = ()=>{ if (!ctx || ctx.state!=='running') initAudio(); if (ctx && ctx.state==='running') ['pointerup','touchend','click','keydown'].forEach(ev=>removeEventListener(ev, wake, true)); };
+  ['pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev, wake, true));
+}
 function paintChannel(id){ const el=document.getElementById('ch-'+id), on=state.ch[id].on; el.classList.toggle('on',on); el.querySelector('button').setAttribute('aria-pressed',on); }
 function markVideoChannel(){ document.getElementById('ch-video').classList.toggle('disabled',!hasVideo); }
 
@@ -601,7 +617,7 @@ function paintRow(r){ gridEl.querySelectorAll(`.row-name[data-row="${r}"]`).forE
 /* a preset or a pasted pattern fills every bar of the current length */
 const fit = (rows, len=steps()) => rows.map(r=>Array.from({length:len},(_,s)=>r[s%r.length]));
 document.getElementById('barAdd').addEventListener('click',()=>{ if (steps()/BAR>=MAX_BARS) return; state.grid=state.grid.map(r=>r.concat(r.slice(-BAR))); buildGrid(); save(); });
-document.getElementById('barDel').addEventListener('click',()=>{ if (steps()<=BAR) return; state.grid=state.grid.map(r=>r.slice(0,-BAR)); buildGrid(); save(); });
+document.getElementById('barDel').addEventListener('click',()=>{ if (steps()<=BAR) return; remember(); state.grid=state.grid.map(r=>r.slice(0,-BAR)); buildGrid(); save(); });
 buildGrid();
 
 /* knobs */
@@ -617,16 +633,41 @@ const setSwing = knob('swing','swing',v=>Math.round(v*200)+'%');
 const setVerb = knob('verb','reverb',pct,()=>ctx&&verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05));
 const setVol = knob('seqVol','seqVol',pct,()=>ctx&&seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05));
 
+/* nothing the user made is lost: presets, «Случайно», «Очистить», removing a bar and opening someone's link can be undone, even after a reload */
+const UNDO_KEY = 'steklobit:undo', undoBtn = document.getElementById('undo');
+let undo = []; try { undo = JSON.parse(localStorage.getItem(UNDO_KEY)) || []; } catch(e){}
+const snapshot = ()=>JSON.stringify({grid:state.grid, bpm:state.bpm, swing:state.swing, reverb:state.reverb, seqVol:state.seqVol, mute:state.mute});
+function storeUndo(){ try { localStorage.setItem(UNDO_KEY, JSON.stringify(undo)); } catch(e){} undoBtn.hidden = !undo.length; }
+function remember(snap=snapshot()){ if (undo[undo.length-1]!==snap){ undo.push(snap); if (undo.length>30) undo.shift(); } storeUndo(); }
+function refreshSeq(){
+  setBpm(state.bpm); setSwing(state.swing); setVerb(state.reverb); setVol(state.seqVol);
+  buildGrid(); ROWS.forEach((_,r)=>{ if (ctx) rowGain[r].gain.setTargetAtTime(state.mute[r]?0:1,ctx.currentTime,.02); });
+  if (ctx){ verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05); seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05); syncVideoRate(); }
+}
+undoBtn.addEventListener('click',()=>{
+  if (!undo.length) return;
+  const s = JSON.parse(undo.pop());
+  Object.assign(state, s, {grid:padRows(s.grid), mute:ROWS.map((_,i)=>!!(s.mute||[])[i])});
+  refreshSeq(); save(); storeUndo(); note('Вернул, как было');
+});
+document.addEventListener('keydown',e=>{ if ((e.ctrlKey||e.metaKey) && !e.shiftKey && e.code==='KeyZ' && e.target.tagName!=='INPUT' && undo.length){ e.preventDefault(); undoBtn.click(); } });
+storeUndo();
+const loopsSel = document.getElementById('loops');
+if ([...loopsSel.options].some(o=>+o.value===state.loops)) loopsSel.value = state.loops;
+loopsSel.addEventListener('change',()=>{ state.loops = +loopsSel.value; save(); });
+
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{
+  remember();
   const p=PRESETS[b.dataset.preset]; state.grid=fit(padRows(p.rows.map(parse))); state.bpm=p.bpm; state.swing=p.swing;
   setBpm(p.bpm); setSwing(p.swing); ROWS.forEach((_,r)=>paintRow(r)); save();
 }));
 document.getElementById('rand').addEventListener('click',()=>{
+  remember();
   const dens=[.18,.1,.15,.5,.35,.2, .2,.1,.4,.08,.02,.05,.05];
   state.grid=ROWS.map((_,r)=>Array.from({length:steps()},(_,s)=>{ const p=dens[r]*(s%4===0?1.8:1); return Math.random()<p?(Math.random()<.65?1:2):0; }));
   ROWS.forEach((_,r)=>paintRow(r)); save();
 });
-document.getElementById('clear').addEventListener('click',()=>{ state.grid=ROWS.map(()=>Array(steps()).fill(0)); ROWS.forEach((_,r)=>paintRow(r)); save(); });
+document.getElementById('clear').addEventListener('click',()=>{ remember(); state.grid=ROWS.map(()=>Array(steps()).fill(0)); ROWS.forEach((_,r)=>paintRow(r)); save(); });
 
 /* ---------- scheduler ---------- */
 const stepDur = ()=>60/state.bpm/4;
@@ -751,13 +792,13 @@ function decodeBeat(hash){
   return true;
 }
 function applyLink(){
+  const mine = snapshot();
   if (!decodeBeat(location.hash)) return;
-  setBpm(state.bpm); setSwing(state.swing); setVerb(state.reverb); setVol(state.seqVol);
-  buildGrid(); ROWS.forEach((_,r)=>{ if (ctx) rowGain[r].gain.setTargetAtTime(state.mute[r]?0:1,ctx.currentTime,.02); });
-  if (ctx){ verbSend.gain.setTargetAtTime(state.reverb,ctx.currentTime,.05); seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05); }
+  if (mine!==snapshot()) remember(mine);   // your own beat stays one «Отменить» away
+  refreshSeq();
   CHANNELS.forEach(c=>{ document.getElementById('vol-'+c.id).value = state.ch[c.id].vol; if (state.ch[c.id].on && !pendingAmb.includes(c.id)){ state.ch[c.id].on=false; paintChannel(c.id); applyChannel(c.id); } });
   save();
-  note('Бит из ссылки загружен. Нажмите ▶, чтобы послушать');
+  note(undo.length ? 'Бит из ссылки загружен. Нажмите ▶, чтобы послушать, или «Отменить», чтобы вернуть свой' : 'Бит из ссылки загружен. Нажмите ▶, чтобы послушать');
   try { history.replaceState(null,'',location.pathname+location.search); } catch(e){}   // later edits are not overwritten on reload
 }
 /* sounds from the link switch on with the first play: browsers do not allow sound before a tap */
