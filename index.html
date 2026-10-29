@@ -199,10 +199,10 @@ body.clean .shade{opacity:0}
         <option value="4">4 такта</option><option value="8" selected>8 тактов</option><option value="16">16 тактов</option><option value="32">32 такта</option>
       </select>
       <button class="chip main" id="export" type="button">Скачать бит</button>
-      <button class="chip main" id="share" type="button">Поделиться ссылкой</button>
+      <button class="chip main" id="share" type="button">Скопировать ссылку</button>
       <span class="act-note" id="actNote" role="status"></span>
     </div>
-    <div class="share-box" id="shareBox" hidden><input id="shareUrl" readonly aria-label="Ссылка на бит"><button class="chip" id="copy" type="button">Копировать</button></div>
+    <div class="share-box" id="shareBox" hidden><input id="shareUrl" readonly aria-label="Текст со ссылкой на бит"><button class="chip" id="copy" type="button">Копировать</button></div>
     <p class="hint">Клетка: нажатие — громкий удар, второе — тихий, третье — убрать. Нажмите на название звука, чтобы заглушить строку. Новый такт начинается копией последнего.</p>
   </div></section>
 </main>
@@ -725,6 +725,7 @@ exportBtn.addEventListener('click', async ()=>{
 });
 
 /* ---------- share: the beat lives in the link's #hash ---------- */
+const SHARE_TEXT = 'Послушай мой бит из стекла —';
 const PAGE_URL = 'https://tastex.github.io/steklobit/';
 const CODE = '.xo';
 function encodeBeat(){
@@ -766,19 +767,19 @@ addEventListener('hashchange', applyLink);
 
 const shareBox=document.getElementById('shareBox'), shareUrl=document.getElementById('shareUrl');
 const ownUrl = /^https?:$/.test(location.protocol) && /(^|\.)github\.io$|^localhost$|^127\.0\.0\.1$/.test(location.hostname);
-document.getElementById('share').addEventListener('click', async ()=>{
-  const url = (ownUrl ? location.origin+location.pathname : PAGE_URL) + '#' + encodeBeat();
-  shareUrl.value = url; shareBox.hidden = false; shareUrl.focus(); shareUrl.select();
-  if (navigator.share && matchMedia('(pointer: coarse)').matches){
-    try { await navigator.share({title:'Стеклобит', text:'Послушай мой бит из стекла', url}); note(''); return; } catch(e){ if (e && e.name==='AbortError') return; }
-  }
-  try { await navigator.clipboard.writeText(url); note('Ссылка скопирована'); } catch(e){ note('Скопируйте ссылку из поля ниже'); }
-});
-document.getElementById('copy').addEventListener('click', async ()=>{
+/* the text with the link is copied at once; the field below keeps it in view in case the clipboard is blocked */
+async function copyMsg(){
   shareUrl.select();
-  try { await navigator.clipboard.writeText(shareUrl.value); note('Ссылка скопирована'); }
-  catch(e){ try { document.execCommand('copy'); note('Ссылка скопирована'); } catch(_){ note('Выделите ссылку и скопируйте'); } }
+  try { await navigator.clipboard.writeText(shareUrl.value); }
+  catch(e){ try { if (!document.execCommand('copy')) throw e; } catch(_){ note('Скопируйте текст из поля ниже'); return; } }
+  note('Текст со ссылкой скопирован');
+}
+document.getElementById('share').addEventListener('click', ()=>{
+  const url = (ownUrl ? location.origin+location.pathname : PAGE_URL) + '#' + encodeBeat();
+  shareUrl.value = SHARE_TEXT + ' ' + url; shareBox.hidden = false; shareUrl.focus();
+  copyMsg();
 });
+document.getElementById('copy').addEventListener('click', copyMsg);
 
 /* clean mode */
 const cleanBtn=document.getElementById('clean');
