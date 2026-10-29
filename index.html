@@ -117,6 +117,7 @@ input[type=range]{width:100%;accent-color:var(--g-amber);margin:0}
 .row-name::before{content:"";width:9px;height:9px;flex:none;background:var(--c);clip-path:polygon(50% 0,100% 45%,60% 100%,0 60%)}
 .row-name.muted{color:var(--ink-dim);text-decoration:line-through}
 .row-name.muted::before{opacity:.3}
+.group{grid-column:1/-1;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);margin-top:8px}
 .cell{appearance:none;border:0;padding:0;height:30px;background:rgba(255,255,255,.07);cursor:pointer;
   clip-path:var(--shard);transition:transform .08s,background .12s,filter .12s}
 .cell.beat{background:rgba(255,255,255,.13)}
@@ -219,7 +220,16 @@ const ROWS = [
   {id:'ice',    name:'Лёд',         c:'var(--g-ice)'},
   {id:'small',  name:'Динь',        c:'var(--g-amber)'},
   {id:'rumble', name:'Гул',         c:'var(--g-tiger)'},
+  // drum kit, synthesized
+  {id:'kick',   name:'Бочка',       c:'var(--g-red)',   drum:true},
+  {id:'snare',  name:'Малый',       c:'var(--g-milk)',  drum:true},
+  {id:'hat',    name:'Хай-хэт',     c:'var(--g-amber)', drum:true},
+  {id:'ride',   name:'Райд',        c:'var(--g-ice)',   drum:true},
+  {id:'crash',  name:'Крэш',        c:'var(--g-turq)',  drum:true},
+  {id:'tomHi',  name:'Том 1',       c:'var(--g-leaf)',  drum:true},
+  {id:'tomLo',  name:'Том 2',       c:'var(--g-tiger)', drum:true},
 ];
+const GLASS_ROWS = ROWS.findIndex(r=>r.drum);
 const CHANNELS = [
   {id:'rain',  name:'Дождь по стеклу', sub:'шум и капли', c:'var(--g-turq)'},
   {id:'wind',  name:'Ветер',           sub:'за окном', c:'var(--g-ice)'},
@@ -241,7 +251,14 @@ const PRESETS = {
     '....x.......x...',
     'o.o.o.o.o.o.o.oo',
     '..x...x...x...x.',
-    'x......x..x.....']},
+    'x......x..x.....',
+    'x.........x.....',
+    '....x.......x...',
+    'x.o.x.o.x.o.x.oo',
+    '................',
+    '................',
+    '................',
+    '................']},
   drops:{bpm:70,swing:.1,rows:[
     'x...o...x..o....',
     '..........x.....',
@@ -255,8 +272,17 @@ const PRESETS = {
     '....x.......x..o',
     'xoxoxoxoxoxoxoxo',
     '..x...x...x...xx',
-    'x..x....x.x.....']},
+    'x..x....x.x.....',
+    'x.....x...x.....',
+    '....x.......x..o',
+    '..x...x...x...x.',
+    'x.o.x.o.x.o.x.o.',
+    'x...............',
+    '............x...',
+    '.............xo.']},
 };
+/* old patterns and links have only the glass rows: the drum rows start empty */
+const padRows = rows => ROWS.map((_,i)=>rows[i] || Array(rows[0].length).fill(0));
 /* glass shards: each tile gets its own slightly irregular outline */
 const j = m => (Math.random()*m).toFixed(1);
 const shard = (m=9) => `polygon(${j(m)}% ${j(m)}%, ${100-j(m)}% ${j(m)}%, ${100-j(m)}% ${100-j(m)}%, ${j(m)}% ${100-j(m)}%)`;
@@ -271,10 +297,10 @@ const KEY = 'steklobit:v2';
 let state = {
   bpm:80, swing:0, reverb:.35, seqVol:.8,
   mute:ROWS.map(()=>false),
-  grid:PRESETS.video.rows.map(parse),
+  grid:padRows(PRESETS.video.rows.map(parse)),
   ch:Object.fromEntries(CHANNELS.map(c=>[c.id,{on:false,vol:.5}])),
 };
-try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.grid) state = {...state, ...s, ch:{...state.ch, ...s.ch}}; } catch(e){}
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.grid) state = {...state, ...s, grid:padRows(s.grid), mute:ROWS.map((_,i)=>!!(s.mute||[])[i]), ch:{...state.ch, ...s.ch}}; } catch(e){}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){} };
 
 /* ---------- audio engine ---------- */
@@ -328,7 +354,7 @@ function partial(f,t,peak,decay,out){
 function noiseHit(t,peak,decay,type,freq,Q,out){
   const s=ctx.createBufferSource(), f=ctx.createBiquadFilter(), g=ctx.createGain();
   s.buffer=noiseBuf; f.type=type; f.frequency.value=freq; f.Q.value=Q; env(g,t,0.001,peak,decay);
-  s.connect(f); f.connect(g); g.connect(out); s.start(t,Math.random()*1.5); s.stop(t+decay+0.05);
+  s.connect(f); f.connect(g); g.connect(out); s.start(t,Math.random()*Math.max(0,1.9-decay)); s.stop(t+decay+0.05);
 }
 const rnd = (a,b)=>a+Math.random()*(b-a);
 
@@ -383,7 +409,38 @@ const INST = {
     env(g,t,.003,.65*v,.9); o.connect(g); g.connect(out); o.start(t); o.stop(t+1);
     partial(98*2.76,t,.16*v,.5,out); partial(98*5.4,t,.07*v,.25,out);
   },
+  /* drum kit */
+  kick(t,v,out){
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.setValueAtTime(150,t); o.frequency.exponentialRampToValueAtTime(45,t+.13);
+    env(g,t,.002,.95*v,.45); o.connect(g); g.connect(out); o.start(t); o.stop(t+.5);
+    noiseHit(t,.25*v,.012,'lowpass',2500,.7,out);
+  },
+  snare(t,v,out){
+    const o=ctx.createOscillator(), g=ctx.createGain(); o.type='triangle';
+    o.frequency.setValueAtTime(220,t); o.frequency.exponentialRampToValueAtTime(170,t+.06);
+    env(g,t,.001,.35*v,.12); o.connect(g); g.connect(out); o.start(t); o.stop(t+.15);
+    noiseHit(t,.5*v,.2,'highpass',1600,.7,out); noiseHit(t,.2*v,.08,'bandpass',4500,1,out);
+  },
+  hat(t,v,out){ metal(t,.22*v,.06,8000,out); },
+  ride(t,v,out){ metal(t,.13*v,1.1,6000,out); partial(5100,t,.035*v,.9,out); partial(3300,t,.02*v,.6,out); },
+  crash(t,v,out){ metal(t,.2*v,1.7,4500,out); noiseHit(t,.22*v,1.4,'highpass',5000,.5,out); },
+  tomHi(t,v,out){ tom(t,v,out,220,150); },
+  tomLo(t,v,out){ tom(t,v,out,140,90); },
 };
+/* cymbals: six detuned square waves, like the classic drum machines */
+function metal(t,peak,decay,hp,out){
+  const bp=ctx.createBiquadFilter(), hi=ctx.createBiquadFilter(), g=ctx.createGain();
+  bp.type='bandpass'; bp.frequency.value=10000; bp.Q.value=.6; hi.type='highpass'; hi.frequency.value=hp;
+  env(g,t,.001,peak,decay); bp.connect(hi); hi.connect(g); g.connect(out);
+  [2,3,4.16,5.43,6.79,8.21].forEach(r=>{ const o=ctx.createOscillator(); o.type='square'; o.frequency.value=40*r*rnd(.99,1.01); o.connect(bp); o.start(t); o.stop(t+decay+.05); });
+}
+function tom(t,v,out,f0,f1){
+  const o=ctx.createOscillator(), g=ctx.createGain();
+  o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+.25);
+  env(g,t,.002,.7*v,.4); o.connect(g); g.connect(out); o.start(t); o.stop(t+.45);
+  noiseHit(t,.12*v,.03,'bandpass',f0*4,1,out);
+}
 
 /* ambient layers */
 function loopNoise(){const s=ctx.createBufferSource(); s.buffer=noiseBuf; s.loop=true; s.start(); return s;}
@@ -520,6 +577,7 @@ function buildGrid(){
     box.innerHTML=`<span class="bar-num">Такт ${bar+1}</span><div class="grid-wrap"><div class="grid"></div></div>`;
     const g=box.querySelector('.grid');
     ROWS.forEach((r,ri)=>{
+      if (ri===GLASS_ROWS){ const lab=document.createElement('div'); lab.className='group'; lab.textContent='Барабаны'; g.appendChild(lab); }
       const name=document.createElement('button'); name.type='button'; name.className='row-name'; name.dataset.row=ri; name.textContent=r.name; name.style.setProperty('--c',r.c);
       name.addEventListener('click',()=>{ state.mute[ri]=!state.mute[ri]; paintRow(ri); if(ctx) rowGain[ri].gain.setTargetAtTime(state.mute[ri]?0:1,ctx.currentTime,.02); save(); });
       g.appendChild(name);
@@ -560,11 +618,11 @@ const setVerb = knob('verb','reverb',pct,()=>ctx&&verbSend.gain.setTargetAtTime(
 const setVol = knob('seqVol','seqVol',pct,()=>ctx&&seqBus.gain.setTargetAtTime(state.seqVol,ctx.currentTime,.05));
 
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{
-  const p=PRESETS[b.dataset.preset]; state.grid=fit(p.rows.map(parse)); state.bpm=p.bpm; state.swing=p.swing;
+  const p=PRESETS[b.dataset.preset]; state.grid=fit(padRows(p.rows.map(parse))); state.bpm=p.bpm; state.swing=p.swing;
   setBpm(p.bpm); setSwing(p.swing); ROWS.forEach((_,r)=>paintRow(r)); save();
 }));
 document.getElementById('rand').addEventListener('click',()=>{
-  const dens=[.18,.1,.15,.5,.35,.2];
+  const dens=[.18,.1,.15,.5,.35,.2, .2,.1,.4,.08,.02,.05,.05];
   state.grid=ROWS.map((_,r)=>Array.from({length:steps()},(_,s)=>{ const p=dens[r]*(s%4===0?1.8:1); return Math.random()<p?(Math.random()<.65?1:2):0; }));
   ROWS.forEach((_,r)=>paintRow(r)); save();
 });
@@ -681,9 +739,9 @@ function encodeBeat(){
 let pendingAmb = [];
 function decodeBeat(hash){
   const q = new URLSearchParams(hash.replace(/^#/,'')), g = (q.get('g')||'').split('-');
-  if (g.length!==ROWS.length || g.some(r=>r.length!==g[0].length || r.length%BAR || r.length>BAR*MAX_BARS || !/^[.xo]+$/.test(r))) return false;
+  if ((g.length!==ROWS.length && g.length!==GLASS_ROWS) || g.some(r=>r.length!==g[0].length || r.length%BAR || r.length>BAR*MAX_BARS || !/^[.xo]+$/.test(r))) return false;
   const num = (k,lo,hi,def)=>{ const v=parseFloat(q.get(k)); return isFinite(v) ? Math.min(hi,Math.max(lo,v)) : def; };
-  state.grid = g.map(r=>[...r].map(c=>CODE.indexOf(c)));
+  state.grid = padRows(g.map(r=>[...r].map(c=>CODE.indexOf(c))));
   state.bpm = Math.round(num('t',56,160,state.bpm)); state.swing = num('sw',0,50,state.swing*100)/100;
   state.reverb = num('e',0,100,state.reverb*100)/100; state.seqVol = num('v',0,100,state.seqVol*100)/100;
   const m = q.get('m')||''; state.mute = ROWS.map((_,i)=>m[i]==='1');
