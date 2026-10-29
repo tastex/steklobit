@@ -15,7 +15,7 @@
 :root{
   --ink:#f3efe6;
   --ink-dim:#c4b9a6;
-  --grout:rgba(18,14,12,.72);       /* dark grout / glass bed behind shards */
+  --grout:rgba(18,14,12,.84);       /* dark grout / glass bed behind shards; opaque enough to need no backdrop blur, which would be redrawn on every video frame */
   --grout-solid:#17110d;
   --walnut:#6a3219; --walnut-deep:#40190a;
   --ochre:#dca42c;  --ochre-deep:#a8721a;
@@ -56,7 +56,7 @@ h1 .l{display:inline-block;padding:4px 3px 2px;background:var(--grout-solid);col
   clip-path:var(--shard);text-shadow:0 0 14px color-mix(in srgb,var(--c) 55%,transparent)}
 h2{font:400 15px/1 var(--f-display);margin:0;letter-spacing:.06em;text-transform:uppercase}
 .tools{display:flex;gap:8px;flex-wrap:wrap}
-.btn{border:0;background:var(--grout);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+.btn{border:0;background:var(--grout);
   padding:9px 16px;cursor:pointer;font-weight:700;font-size:14px;border-radius:3px;
   clip-path:polygon(2% 8%,97% 0,100% 88%,4% 100%);box-shadow:inset 0 0 0 1px var(--edge)}
 .btn:hover{background:rgba(40,30,24,.85)}
@@ -79,7 +79,6 @@ h2{font:400 15px/1 var(--f-display);margin:0;letter-spacing:.06em;text-transform
 .pin{position:absolute;left:50%;top:-40px;width:12px;height:34px;translate:-50% 0;rotate:6deg;border-radius:3px;
   background:linear-gradient(90deg,#b9925c,var(--pin) 45%,#b9925c);box-shadow:0 2px 4px rgba(0,0,0,.4);z-index:1}
 .glass{background:var(--grout);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:14px;
-  backdrop-filter:blur(16px) saturate(1.2);-webkit-backdrop-filter:blur(16px) saturate(1.2);
   box-shadow:inset 0 0 0 2px rgba(0,0,0,.35),inset 0 2px 10px rgba(0,0,0,.5)}
 .pane-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .hand{font:22px/1.1 var(--f-hand);color:var(--ink-dim);margin:0}
@@ -292,13 +291,19 @@ function makeNoise(){
   for (let i=0;i<len;i++) d[i]=Math.random()*2-1;
   return b;
 }
+let lastUse = 0;
 function initAudio(){
+  lastUse = Date.now();
   if (ctx) { if (ctx.state==='suspended') ctx.resume(); return; }
   ctx = new AC();
   buildGraph(0);
   loadSamples();
   CHANNELS.forEach(c=>applyChannel(c.id));
 }
+/* battery: a running audio context keeps the sound hardware awake, so it sleeps once everything is silent */
+setInterval(()=>{
+  if (ctx && ctx.state==='running' && !playing && Date.now()-lastUse>6000 && !CHANNELS.some(c=>state.ch[c.id].on)) ctx.suspend();
+}, 3000);
 /* the whole chain on the current ctx; dur>0 means an offline render of that many seconds */
 function buildGraph(dur){
   master = ctx.createGain(); master.gain.value = .9;
@@ -448,7 +453,9 @@ layoutVideo();
 /* The video is fetched whole after the page has loaded and played from memory, so it also plays where
    the host does not serve byte ranges (iPhone Safari needs them for a plain src). Until then the poster shows. */
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let videoLoading = null, wantPlay = !calm;
+/* with data saver on, the video is fetched only for the «Звук из видео» channel */
+const lean = !!(navigator.connection && navigator.connection.saveData);
+let videoLoading = null, wantPlay = !calm && !lean;
 function startVideo(){
   wantPlay = true;
   if (video.getAttribute('src')) video.play().catch(()=>{});   // blocked autoplay (e.g. Low Power Mode): the next tap retries
@@ -461,9 +468,16 @@ function loadVideo(){
   else if (wantPlay) startVideo();
   return videoLoading;
 }
-if (document.readyState==='complete') loadVideo(); else addEventListener('load', ()=>loadVideo(), {once:true});
+if (!lean){ if (document.readyState==='complete') loadVideo(); else addEventListener('load', ()=>loadVideo(), {once:true}); }
 const retry = ()=>{ if (wantPlay && video.paused && video.getAttribute('src')) video.play().catch(()=>{}); };
 addEventListener('pointerdown', retry); addEventListener('keydown', retry);
+/* battery: nothing plays in a hidden tab unless the video's own sound is on; on a low battery the poster stays */
+const videoHeard = ()=>state.ch.video.on && ctx && ctx.state==='running';
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) retry(); else if (!videoHeard()) video.pause(); });
+if (navigator.getBattery) navigator.getBattery().then(b=>{
+  const check = ()=>{ if (!b.charging && b.level<=.2 && !videoHeard()){ wantPlay=false; video.pause(); } };
+  check(); b.addEventListener('levelchange', check); b.addEventListener('chargingchange', ()=>{ if (b.charging && !calm && !lean){ wantPlay=true; retry(); } else check(); });
+}).catch(()=>{});
 video.addEventListener('error', ()=>{ if (video.getAttribute('src')) { hasVideo=false; markVideoChannel(); } });
 video.addEventListener('loadeddata', ()=>{ hasVideo=true; markVideoChannel(); });
 /* while the beat plays, the mosaics keep its tempo: at 80 BPM exactly as in the video */
@@ -582,7 +596,7 @@ playBtn.addEventListener('click',()=>{
   syncVideoRate();
   if (playing){ cur=0; nextT=ctx.currentTime+.06; queue.length=0; schedule(); timer=setInterval(schedule,25); requestAnimationFrame(draw);
     icon.innerHTML='<path d="M5 3h4v14H5zM11 3h4v14h-4z"/>'; playBtn.setAttribute('aria-label','Пауза'); }
-  else { clearInterval(timer); showStep(-1); icon.innerHTML='<path d="M5 3l12 7-12 7z"/>'; playBtn.setAttribute('aria-label','Играть'); }
+  else { clearInterval(timer); lastUse=Date.now(); showStep(-1); icon.innerHTML='<path d="M5 3l12 7-12 7z"/>'; playBtn.setAttribute('aria-label','Играть'); }
 });
 document.addEventListener('keydown',e=>{ if(e.code==='Space' && e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON'){ e.preventDefault(); playBtn.click(); } });
 
